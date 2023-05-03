@@ -1,8 +1,8 @@
 /pretrained_models/
 vibvoice/transfer_function/
 vibvoice/vis/
-vibvoice/json
-vibvoice/plot
+vibvoice/json/
+vibvoice/plot/
 *.pdf
 *.wav
 *.pth

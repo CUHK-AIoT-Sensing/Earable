@@ -3,20 +3,43 @@ This is a repo for Mobisys 2022 paper: " <a href="https://dl.acm.org/doi/abs/10.
 
 # Requirements
 The program has been tested in the following environment: 
-* Python 3.9.7
-* Pytorch 1.8.1
-* torchvision 0.9.1
-* sklearn 0.24.2
-* opencv-python 4.5.5
-* numpy 1.20.3
+* Python 3.8
+* torch 1.12.1
+* scikit-image 0.20.0
+* pesq 0.0.4
+* pystoi 0.3.3
+Normally, all the other libraries can be installed by pip.
+The repo has been tested on Ubuntu 20.04 with two RTX 3090 GPUs, the repo has been partially tested on Windows 10 with one RTX 3060 GPU (some format need revised).
 
-# Cosmo Overview
+# VibVoice Overview
 <p align="center" >
 	<img src="https://github.com/xmouyang/Cosmo/blob/main/materials/Overview.png" width="700">
 </p>
 
 # Project Strcuture
 ```
+.
+├── __init__.py
+├── bone_conduction_function.py
+├── dataset.py          # pytorch dataset
+├── display.py          # check the tranfer function
+├── evaluation.py
+├── feature.py
+├── json_generate.py     # get the meta data for loading
+├── mask.py
+├── model
+│   ├── SEANet.py
+│   ├── __init__.py
+│   ├── base_model.py
+│   ├── deep_augmentation.py
+│   ├── fullsubnet.py
+│   ├── module/             # mainly for baseline 
+│   ├── new_vibvoice.py
+│   ├── vibvoice.py
+│   └── voicefilter.py
+├── model_zoo.py            # all the training function
+├── synchronization.p #data pre-processing, already done
+└── train.py          # both train and evaluation
 ```
 # Data collection
  * Connect BMI160_I2C to Raspberry Pi with the <a href="https://github.com/lefuturiste/BMI160-i2c"> Instructions </a>
