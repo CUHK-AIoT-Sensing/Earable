@@ -7,26 +7,17 @@ import numpy as np
 
 freq_bin_high = 33
 
-def noise_extraction(time_bin):
-    noise_list = os.listdir('../../dataset/noise/')
-    index = np.random.randint(0, len(noise_list))
-    noise_clip = np.load('../dataset/noise/' + noise_list[index])
-    index = np.random.randint(0, noise_clip.shape[1] - time_bin)
-    return noise_clip[:, index:index + time_bin]
-
 def synthetic(clean, transfer_function, N):
     time_bin = clean.shape[-1]
     index = np.random.randint(0, N)
-    f = transfer_function[index, 0]
+    f = transfer_function[index, :, 0]
     f = f / np.max(f)
-    v = transfer_function[index, 1] / np.max(f)
+    v = transfer_function[index, :, 1] / np.max(f)
     response = np.tile(np.expand_dims(f, axis=1), (1, time_bin))
     for j in range(time_bin):
         response[:, j] += np.random.normal(0, v, (freq_bin_high))
     response = torch.from_numpy(response).to(clean.device)
     acc = clean[..., :freq_bin_high, :] * response
-    # background_noise = noise_extraction(time_bin)
-    # noisy += 2 * background_noise
     return acc
 
 class IMU_branch(nn.Module):
@@ -167,7 +158,7 @@ class vibvoice(nn.Module):
         self.Audio_branch = Audio_branch()
         self.Residual_block = Residual_Block(384)
 
-        self.transfer_function = np.load('transfer_function_EMSB_filter.npy')
+        self.transfer_function = np.load('function_pool.npy')
         self.length_transfer_function = self.transfer_function.shape[0]
     def norm(self, x):
         mu = torch.mean(x, dim=list(range(1, x.dim())), keepdim=True)

@@ -1,11 +1,10 @@
 import os
 import time
-
 import matplotlib.pyplot as plt
 import torch
 torch.manual_seed(0)
 from dataset import NoisyCleanSet
-from model import TSCNet, vibvoice, fullsubnet
+from model import vibvoice, fullsubnet
 import numpy as np
 from tqdm.auto import tqdm
 import argparse
@@ -88,13 +87,12 @@ if __name__ == "__main__":
     model_name = args.model
     model = globals()[model_name]().to(device)
     people = ["hou", "1", "2", "3", "4", "5", "6", "7", "8", "yan", "wu", "liang", "shuai", "shi", "he"]
-    # model = torch.nn.DataParallel(model, device_ids=[0, 1])
     if args.mode == 0:
         # This script is for model pre-training on LibriSpeech
         BATCH_SIZE = 64
         lr = 0.0001
         EPOCH = 20
-        dataset = NoisyCleanSet(['json/librispeech-100.json', 'json/all_noise.json'], simulation=True,
+        dataset = NoisyCleanSet(['json/librispeech-100.json', 'json/noises.json'], simulation=True,
                                 ratio=1, rir=None, dvector=None)
         ckpt_best, loss_curve, metric_best = train(dataset, EPOCH, lr, BATCH_SIZE, model)
         plt.plot(loss_curve)

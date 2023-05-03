@@ -1,4 +1,3 @@
-import librosa
 import torch
 import numpy as np
 from evaluation import batch_pesq, SI_SDR, batch_stoi, eval_ASR, LSD
@@ -6,9 +5,7 @@ import torch.nn.functional as F
 from scipy import signal
 from mask import build_complex_ideal_ratio_mask, decompress_cIRM
 from feature import stft, istft
-from sisdr_loss import StabilizedPermInvSISDRMetric
-
-from speechbrain.pretrained import EncoderDecoderASR
+# from speechbrain.pretrained import EncoderDecoderASR
 '''
 This script contains 4 model's training and test due to their large differences (for concise)
 1. FullSubNet, LSTM, spectrogram magnitude -> cIRM
@@ -20,8 +17,6 @@ This script contains 4 model's training and test due to their large differences 
 # asr_model = EncoderDecoderASR.from_hparams(source="speechbrain/asr-transformer-transformerlm-librispeech",
 #                                            savedir="pretrained_models/asr-transformer-transformerlm-librispeech",
 #                                            run_opts={"device": "cuda"})
-sisdr_loss = StabilizedPermInvSISDRMetric(n_actual_sources=2, n_estimated_sources=2,
-                                  zero_mean=True, backward_loss=True, improvement=True)
 def eval(clean, predict, text=None):
     if text is not None:
         wer_clean, wer_noisy = eval_ASR(clean, predict, text, asr_model)
@@ -31,31 +26,11 @@ def eval(clean, predict, text=None):
         metric2 = batch_pesq(clean, predict, 'nb')
         metric3 = SI_SDR(clean, predict)
         metric4 = batch_stoi(clean, predict)
-        metric5 = LSD(clean, predict)
-        metrics = [metric1, metric2, metric3, metric4, metric5]
+        metrics = [metric1, metric2, metric3, metric4]
     return np.stack(metrics, axis=1)
 
 def dot(x, y):
     return torch.sum(x * y, dim=-1, keepdim=True)
-def compute_permuted_sisnrs(permuted_pr_batch, t_batch, t_t_diag, eps=10e-8):
-    pr_signal_powers = dot(permuted_pr_batch, permuted_pr_batch)
-    inner_prod_sq = dot(permuted_pr_batch, t_batch) ** 2
-    rho_sq = inner_prod_sq / (pr_signal_powers * t_t_diag + eps)
-    return 10 * torch.log10((rho_sq + eps) / (1. - rho_sq + eps))
-def sisdr_loss(pr_batch, t_batch, initial_mixtures, eps=1e-8):
-    pr_batch = pr_batch - torch.mean(pr_batch, dim=-1, keepdim=True)
-    t_batch = t_batch - torch.mean(t_batch, dim=-1, keepdim=True)
-    initial_mixtures = initial_mixtures - torch.mean(initial_mixtures, dim=-1, keepdim=True)
-    t_t_diag = dot(t_batch, t_batch)
-
-    sisnr = compute_permuted_sisnrs(pr_batch, t_batch, t_t_diag, eps=eps)
-    # sisnr = 0.75 * sisnr[:, 0, 0] + 0.25 * sisnr[:, 1, 0]
-
-    #initial_mix = initial_mixtures.repeat(1, 2, 1)
-    #base_sisdr = compute_permuted_sisnrs(initial_mix, t_batch, t_t_diag, eps=eps)
-    #sisnr -= base_sisdr.mean()
-    sisnr = sisnr.mean()
-    return -sisnr
 def Spectral_Loss(x_mag, y_mag):
     """Calculate forward propagation.
           Args:
@@ -69,32 +44,6 @@ def Spectral_Loss(x_mag, y_mag):
     spectral_convergenge_loss = torch.norm(y_mag - x_mag, p="fro") / torch.norm(y_mag, p="fro")
     log_stft_magnitude = F.l1_loss(torch.log(y_mag), torch.log(x_mag))
     return 0.5 * spectral_convergenge_loss + 0.5 * log_stft_magnitude
-def train_sudormrf(model, acc, noise, clean, optimizer, device='cuda'):
-    # sudormrf only for 8k
-    noise = noise[:, ::2]
-    clean = clean[:, ::2]
-    optimizer.zero_grad()
-    noise = noise.unsqueeze(1).to(device=device)
-    clean = clean.unsqueeze(1).to(device=device)
-    # residual_noise = noise - clean
-    # predict = model(noise, acc.to(device=device))
-    # loss = sisdr_loss(predict, torch.cat([clean, residual_noise], dim=1), noise)
-    # loss = torch.clamp(
-    #     loss, min=-30., max=+30.)
-    predict = model(noise)
-    loss = sisdr_loss(predict, clean, noise)
-    loss.backward()
-    optimizer.step()
-    return loss.item()
-def test_sudormrf(model, acc, noise, clean, device='cuda', text=None):
-    noise = noise[:, ::2]
-    clean = clean[:, ::2]
-
-    noise = noise.unsqueeze(1).to(device=device)
-    predict = model(noise)[:, 0, :]
-    predict = predict.cpu().numpy()
-    clean = clean.numpy()
-    return eval(clean, predict, text=text)
 def train_voicefilter(model, acc, noise, clean, optimizer, device='cuda'):
     noisy_mag, _, _, _ = stft(noise, 400, 160, 400)
     clean_mag, _, _, _ = stft(clean, 400, 160, 400)
@@ -215,62 +164,3 @@ def test_SEANet(model, acc, noise, clean, device='cuda', text=None):
     clean = clean.squeeze(1).numpy()
     predict = predict1.cpu().numpy()
     return eval(clean, predict, text)
-
-def train_conformer(model, acc, noise, clean, optimizer, optimizer_disc=None, discriminator=None, device='cuda'):
-
-    clean_mag = clean.abs().to(device=device, dtype=torch.float)
-    # predict real and imag - conformer
-    optimizer.zero_grad()
-    noisy_spec = torch.stack([noise.real, noise.imag], 1).to(device=device, dtype=torch.float).permute(0, 1, 3, 2)
-    clean_real, clean_imag = clean.real.to(device=device, dtype=torch.float), clean.imag.to(device=device, dtype=torch.float)
-    est_real, est_imag = model(noisy_spec)
-    est_mag = torch.sqrt(est_real ** 2 + est_imag ** 2)
-    loss = 0.9 * F.mse_loss(est_mag, clean_mag) + 0.1 * F.mse_loss(est_real, clean_real) + F.mse_loss(est_imag, clean_imag)
-
-    # adversarial training
-    BATCH_SIZE = noise.shape[0]
-    one_labels = torch.ones(BATCH_SIZE).cuda()
-    predict_fake_metric = discriminator(clean_mag, est_mag)
-    gen_loss_GAN = F.mse_loss(predict_fake_metric.flatten(), one_labels.float())
-    loss += 0.1 * gen_loss_GAN
-    loss.backward()
-    optimizer.step()
-
-    # discriminator loss
-    optimizer_disc.zero_grad()
-    predict = torch.complex(est_real, est_imag)
-    predict_audio = predict.detach().cpu().numpy()
-    predict_audio = np.pad(predict_audio, ((0, 0), (0, 0), (1, int(seg_len_mic / 2) + 1 - freq_bin_high), (1, 0)))
-    predict_audio = signal.istft(predict_audio, rate_mic, nperseg=seg_len_mic, noverlap=overlap_mic)[-1]
-
-    clean_audio = np.pad(clean, ((0, 0), (0, 0), (1, int(seg_len_mic / 2) + 1 - freq_bin_high), (1, 0)))
-    clean_audio = signal.istft(clean_audio, rate_mic, nperseg=seg_len_mic, noverlap=overlap_mic)[-1]
-
-    pesq_score = discriminator.batch_pesq(clean_audio, predict_audio)
-    # The calculation of PESQ can be None due to silent part
-    if pesq_score is not None:
-        optimizer_disc.zero_grad()
-        predict_enhance_metric = discriminator(clean_mag, predict.detach())
-        predict_max_metric = discriminator(clean_mag, clean_mag)
-        discrim_loss = F.mse_loss(predict_max_metric.flatten(), one_labels) + \
-                       F.mse_loss(predict_enhance_metric.flatten(), pesq_score)
-        discrim_loss.backward()
-        optimizer_disc.step()
-    else:
-        discrim_loss = torch.tensor([0.])
-    return loss.item(), discrim_loss.item()
-def test_conformer(model, acc, noise, clean, device='cuda'):
-    # predict real and imag - conformer
-    noisy_spec = torch.stack([noise.real, noise.imag], 1).to(device=device, dtype=torch.float).permute(0, 1, 3, 2)
-    est_real, est_imag = model(noisy_spec)
-    predict = torch.complex(est_real, est_imag)
-
-    predict = predict.cpu().numpy()
-    clean = clean.cpu().numpy()
-
-    predict = np.pad(predict, ((0, 0), (1, int(seg_len_mic / 2) + 1 - freq_bin_high), (1, 0)))
-    predict = signal.istft(predict, rate_mic, nperseg=seg_len_mic, noverlap=overlap_mic)[-1]
-
-    clean = np.pad(clean, ((0, 0), (1, int(seg_len_mic / 2) + 1 - freq_bin_high), (1, 0)))
-    clean = signal.istft(clean, rate_mic, nperseg=seg_len_mic, noverlap=overlap_mic)[-1]
-    return eval(clean, predict)

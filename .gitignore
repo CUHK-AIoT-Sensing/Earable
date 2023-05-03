@@ -1,6 +1,8 @@
-/dataset/
 /pretrained_models/
-/transfer_function/
+vibvoice/transfer_function/
+vibvoice/vis/
+vibvoice/json
+vibvoice/plot
 *.pdf
 *.wav
 *.pth
