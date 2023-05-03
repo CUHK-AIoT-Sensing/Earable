@@ -18,19 +18,39 @@ The program has been tested in the following environment:
 # Project Strcuture
 ```
 ```
+# Data collection
+ * Connect BMI160_I2C to Raspberry Pi with the <a href="https://github.com/lefuturiste/BMI160-i2c"> Instructions </a>
+ * 3D-printing the bone-conduction headset, the design can be found in ./3dmodel
+ * get a USB microphone to raspberry pi (other microphone is also possible, but you the USB one is easy to use)
+ * Run the following code for data collection, you may need some debugging with the number of device (the mic device number can be random sometimes, may caused by ssh connection)
+    ```
+    python datarecord.py --device 0
+    ```
+## troubleshootings
+1. Q: why there are enourmous printing out? 
+    
+    A: Face contact with the I2C header. On the other hand, after 30-minutes recording, such accident may happen (the header loose).
+2. Q: why my sample rate is not as high as 1600 Hz?
+
+    A: Raspberry Pi has a default sampling limit.
 
 # Dataset preparation
 ## Audio-IMU dataset
-* <a href="https://github.com/elevoctech/ESMB-corpus"> Self-collected dataset, collected by </a>
+* <a href="https://mycuhk-my.sharepoint.com/:u:/g/personal/1155170464_link_cuhk_edu_hk/Ef2s_G61F8BMnU-ksQpuP88B7wgDOu7VhNlYXsQZXAq4Pg?e=Xb8Jhc"> Self-collected dataset, 15 people (around 3 hours, main experiment)</a>
+* <a href="https://mycuhk-my.sharepoint.com/:f:/g/personal/1155170464_link_cuhk_edu_hk/EiBk2p45s3RMiao70y4SZE8B8bFNUPtjgyot23ZtaXsC5A?e=AUqEeC"> Self-collected dataset, 8 people (small-scale, only for bone conduction function) </a>
+
 * <a href="https://github.com/elevoctech/ESMB-corpus"> ESMB </a>
 ## Audio-only dataset
 * <a href="https://www.openslr.org/12"> Librispeech </a>
 * <a href="https://www.eng.biu.ac.il/~gannot/RIR_DATABASE/"> RIR (optional, and can be other RIR dataset) </a>
-* Noise dataset, for simplicity, we can just use development set of LibriSpeech as strong speech noise. Other noise dataset can be used as well, besides, we also use music dataset and background environment sound dataset.
+* Noise dataset, for simplicity, we can just use development set of LibriSpeech as strong speech noise. Other noise dataset can be used as well, besides, we also use <a href="https://mycuhk-my.sharepoint.com/:f:/g/personal/1155170464_link_cuhk_edu_hk/Ej0rWcuPnXVHt7VI4VRALFwBWrrZ4UlzJys3UZvL5NLvBg?e=eO75Tb"> environmental noises</a> and <a href="https://mycuhk-my.sharepoint.com/:f:/g/personal/1155170464_link_cuhk_edu_hk/El6D8hH2-cxMrpB4u9QgP3ABWckinFqNlKpz2veipZqCvA?e=i5hBnl"> music dataset. </a>
+
+## Instructions
+* Download all the datasets and place them in the same folder. Specially, we have `./bone_conduction_function`, `our`, `librispeech-100`, `dev` (librispeech-dev), , `background`, `music` and `rir_fullsubnet`.
 
 
 # Quick Start
-* Download the `self-collected dataset` dataset (8 users for bone conduction function, 15 users for the main results) and `librispeech-100-clean` to your machine. Specially, `./bone_conduction_function`, `our`, `librispeech-100`, `dev` (librispeech-dev), `rir_fullsubnet`, `background` and `music` should be placed on the same folder.
+
 * Run the following code for transfer-function extraction, the npz files will be created in ./transfer_function
     ```
     python bone_conduction_function.py  --data_dir dir/to/dataset/bone_conduction_function
@@ -47,15 +67,11 @@ The program has been tested in the following environment:
 
 * Run the following code for model pretraining
     ```
-    python train.py
+    python train.py --mode 0
     ```
 * Run the following code for model fine-tuning
-    ```bash
-    cd ./sample-code-UTD/supervised-baselines/
-    python3 attnsense_main_ce.py --batch_size 16 --label_rate 5 --learning_rate 0.001
-    python3 deepsense_main_ce.py --batch_size 16 --label_rate 5 --learning_rate 0.001
-    python3 single_main_ce.py --modality inertial --batch_size 16 --label_rate 5 --learning_rate 0.001
-    python3 single_main_ce.py --modality skeleton --batch_size 16 --label_rate 5 --learning_rate 0.001
+    ```
+    python train.py --mode 1
     ```
 
 
@@ -63,12 +79,5 @@ The program has been tested in the following environment:
 # Citation
 The code of this project are made available for non-commercial, academic research only. If you would like to use the code of this project, please cite the following paper:
 ```
-@inproceedings{ouyang2022cosmo,
-  title={Cosmo: contrastive fusion learning with small data for multimodal human activity recognition},
-  author={Ouyang, Xiaomin and Shuai, Xian and Zhou, Jiayu and Shi, Ivy Wang and Xie, Zhiyuan and Xing, Guoliang and Huang, Jianwei},
-  booktitle={Proceedings of the 28th Annual International Conference on Mobile Computing And Networking},
-  pages={324--337},
-  year={2022}
-}
 ```
     
