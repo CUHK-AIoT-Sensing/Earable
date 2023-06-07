@@ -3,7 +3,6 @@ vibvoice/transfer_function/
 vibvoice/vis/
 vibvoice/json/
 vibvoice/plot/
-*.pdf
 *.wav
 *.pth
 *.ckpt

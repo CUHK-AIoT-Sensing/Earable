@@ -8,12 +8,13 @@ The program has been tested in the following environment:
 * scikit-image 0.20.0
 * pesq 0.0.4
 * pystoi 0.3.3
+
 Normally, all the other libraries can be installed by pip.
 The repo has been tested on Ubuntu 20.04 with two RTX 3090 GPUs, the repo has been partially tested on Windows 10 with one RTX 3060 GPU (some format need revised).
 
 # VibVoice Overview
 <p align="center" >
-	<img src="https://github.com/xmouyang/Cosmo/blob/main/materials/Overview.png" width="700">
+	<img src="https://github.com/CUHK-AIoT-Sensing/vibvoice/tree/main/overview.pdf" width="700">
 </p>
 
 # Project Strcuture
@@ -69,7 +70,7 @@ The repo has been tested on Ubuntu 20.04 with two RTX 3090 GPUs, the repo has be
 * Noise dataset, for simplicity, we can just use development set of LibriSpeech as strong speech noise. Other noise dataset can be used as well, besides, we also use <a href="https://mycuhk-my.sharepoint.com/:f:/g/personal/1155170464_link_cuhk_edu_hk/Ej0rWcuPnXVHt7VI4VRALFwBWrrZ4UlzJys3UZvL5NLvBg?e=eO75Tb"> environmental noises</a> and <a href="https://mycuhk-my.sharepoint.com/:f:/g/personal/1155170464_link_cuhk_edu_hk/El6D8hH2-cxMrpB4u9QgP3ABWckinFqNlKpz2veipZqCvA?e=i5hBnl"> music dataset. </a>
 
 ## Instructions
-* Download all the datasets and place them in the same folder. Specially, we have `./bone_conduction_function`, `our`, `librispeech-100`, `dev` (librispeech-dev), , `background`, `music` and `rir_fullsubnet`.
+* Download all the datasets and place them in the same folder. Specially, we have `./bone_conduction_function`, `our`, `librispeech-100`, `dev` (librispeech-dev), `background`, `music` and `rir_fullsubnet`.
 
 
 # Quick Start
