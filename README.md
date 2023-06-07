@@ -14,7 +14,7 @@ The repo has been tested on Ubuntu 20.04 with two RTX 3090 GPUs, the repo has be
 
 # VibVoice Overview
 <p align="center" >
-	<img src="https://github.com/CUHK-AIoT-Sensing/vibvoice/blob/main/overview.pdf" width="700">
+	<img src="https://github.com/CUHK-AIoT-Sensing/vibvoice/blob/main/overview.jpg" width="700">
 </p>
 
 # Project Strcuture
