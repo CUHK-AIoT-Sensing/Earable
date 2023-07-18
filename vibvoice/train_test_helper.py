@@ -16,7 +16,38 @@ This script contains 4 model's training and test due to their large differences 
 # Uncomment for using another pre-trained model
 # asr_model = EncoderDecoderASR.from_hparams(source="speechbrain/asr-transformer-transformerlm-librispeech",
 #                                            savedir="pretrained_models/asr-transformer-transformerlm-librispeech",
-#                                            run_opts={"device": "cuda"})
+#  
+#                                         run_opts={"device": "cuda"})
+
+freq_bin_high = 33
+transfer_function = np.load('function_pool.npy')
+length_transfer_function = transfer_function.shape[0]
+def OverlapAndAdd(inputs,frame_shift):
+        nframes = inputs.shape[-2]
+        frame_size = inputs.shape[-1]
+        frame_step = frame_shift
+        sig_length = (nframes - 1) * frame_step + frame_size
+        sig = np.zeros(list(inputs.shape[:-2]) + [sig_length], dtype=inputs.dtype)
+        ones = np.zeros_like(sig)
+        start = 0
+        end = start + frame_size
+        for i in range(nframes):
+            sig[..., start:end] += inputs[..., i, :]
+            ones[..., start:end] += 1.
+            start = start + frame_step
+            end = start + frame_size
+        return sig / ones
+def synthetic(clean):
+    time_bin = clean.shape[-1]
+    index = np.random.randint(0, length_transfer_function)
+    f = transfer_function[index, :, 0]
+    v = transfer_function[index, :, 1]
+    response = np.tile(np.expand_dims(f, axis=1), (1, time_bin))
+    for j in range(time_bin):
+        response[:, j] += np.random.normal(0, v, (freq_bin_high))
+    acc = torch.from_numpy(response / np.max(f)).to(clean.device) * clean[:, :freq_bin_high, :]
+    acc = clean[:, :freq_bin_high, :]
+    return acc
 def eval(clean, predict, text=None):
     if text is not None:
         wer_clean, wer_noisy = eval_ASR(clean, predict, text, asr_model)
@@ -29,8 +60,6 @@ def eval(clean, predict, text=None):
         metrics = [metric1, metric2, metric3, metric4]
     return np.stack(metrics, axis=1)
 
-def dot(x, y):
-    return torch.sum(x * y, dim=-1, keepdim=True)
 def Spectral_Loss(x_mag, y_mag):
     """Calculate forward propagation.
           Args:
@@ -44,31 +73,57 @@ def Spectral_Loss(x_mag, y_mag):
     spectral_convergenge_loss = torch.norm(y_mag - x_mag, p="fro") / torch.norm(y_mag, p="fro")
     log_stft_magnitude = F.l1_loss(torch.log(y_mag), torch.log(x_mag))
     return 0.5 * spectral_convergenge_loss + 0.5 * log_stft_magnitude
-def train_voicefilter(model, acc, noise, clean, optimizer, device='cuda'):
-    noisy_mag, _, _, _ = stft(noise, 400, 160, 400)
-    clean_mag, _, _, _ = stft(clean, 400, 160, 400)
+def train_TCNN(model, acc, noise, clean, optimizer, device='cuda'):
     optimizer.zero_grad()
-
-    noisy_mag = noisy_mag.to(device=device)
-    clean_mag = clean_mag.to(device=device)
-    mask = model(noisy_mag.permute(0, 2, 1), acc.to(device=device)).permute(0, 2, 1)
-    predict = noisy_mag * mask
-
-    loss = F.mse_loss(predict, clean_mag)
+    predict = model(noise.to(device).unsqueeze(1))
+    #spec_predict = torch.stft(predict, 640, 320, 640, window=torch.hann_window(640, device=predict.device), return_complex=True).abs()
+    #spec_clean = torch.stft(clean, 640, 320, 640, window=torch.hann_window(640, device=clean.device), return_complex=True).abs().to(device)
+    # loss = Spectral_Loss(spec_clean, spec_predict)
+    loss = F.mse_loss(predict.squeeze(1), clean.to(device).unfold(-1, 640, 320))
     loss.backward()
     optimizer.step()
     return loss.item()
-def test_voicefilter(model, acc, noise, clean, device='cuda', text=None, data=False):
-    noisy_mag, noisy_phase, _, _ = stft(noise, 400, 160, 400)
-
-    noisy_mag = noisy_mag.to(device=device)
-    mask = model(noisy_mag.permute(0, 2, 1), acc.to(device=device)).permute(0, 2, 1)
-    predict = noisy_mag * mask
-
-    predict = predict.cpu()
-    predict = istft((predict, noisy_phase), 400, 160, 400, input_type="mag_phase").numpy()
+def test_TCNN(model, acc, noise, clean, device='cuda', text=None):
+    predict = model(noise.to(device).unsqueeze(1))
+    predict = predict.cpu().squeeze(1).numpy()
+    predict = OverlapAndAdd(predict, 320)
     clean = clean.numpy()
     return eval(clean, predict, text=text)
+def train_CRN(model, acc, noise, clean, optimizer, device='cuda'):
+    noisy_mag, _, _, _ = stft(noise, 640, 320, 640)
+    clean_mag, _, _, _ = stft(clean, 640, 320, 640)
+    optimizer.zero_grad()
+    noisy_mag = noisy_mag.to(device=device)
+    clean_mag = clean_mag.to(device=device)
+    if acc == None:
+        acc = synthetic(clean_mag)
+    else:
+        acc, _, _, _ = stft(acc, 64, 32, 64)
+        acc = torch.norm(acc.to(device=device), dim=1, p=2)
+    predict_clean, predict_acc = model(noisy_mag, acc)
+    loss1 = Spectral_Loss(predict_clean, clean_mag.unsqueeze(1))
+    loss2 = 0.2 * Spectral_Loss(predict_acc, clean_mag.unsqueeze(1)[:, :, :freq_bin_high, :])
+    loss = loss1 + loss2
+    loss.backward()
+    optimizer.step()
+    return loss.item()
+def test_CRN(model, acc, noise, clean, device='cuda', text=None):
+    noisy_mag, noisy_phase, _, _ = stft(noise, 640, 320, 640)
+    clean_mag, _, _, _ = stft(clean, 640, 320, 640)
+    noisy_mag = noisy_mag.to(device=device)
+    clean_mag = clean_mag.to(device=device)
+    if acc == None:
+        acc = synthetic(clean_mag)
+    else:
+        acc, _, _, _ = stft(acc, 64, 32, 64)
+        acc = torch.norm(acc.to(device=device), dim=1, p=2)
+
+    predict, _ = model(noisy_mag, acc)
+    predict = predict.cpu().squeeze(1)
+    predict = istft((predict, noisy_phase), 640, 320, 640, input_type="mag_phase").numpy()
+    clean = clean.numpy()
+    return eval(clean, predict, text=text)
+
 def train_vibvoice(model, acc, noise, clean, optimizer, device='cuda'):
     noisy_mag, _, _, _ = stft(noise, 640, 320, 640)
     clean_mag, _, _, _ = stft(clean, 640, 320, 640)
@@ -92,6 +147,7 @@ def test_vibvoice(model, acc, noise, clean, device='cuda', text=None):
     predict = istft((predict, noisy_phase), 640, 320, 640, input_type="mag_phase").numpy()
     clean = clean.numpy()
     return eval(clean, predict, text=text)
+
 def train_fullsubnet(model, acc, noise, clean, optimizer, device='cuda'):
     optimizer.zero_grad()
     noise = noise.to(device=device)
@@ -126,41 +182,3 @@ def test_fullsubnet(model, acc, noise, clean, device='cuda', text=None, data=Fal
         return eval(clean, predict, text=text), predict, noise
     else:
         return eval(clean, predict, text=text)
-def train_SEANet(model, acc, noise, clean, optimizer, optimizer_disc=None, discriminator=None, device='cuda'):
-    predict1, predict2 = model(acc.to(device=device, dtype=torch.float), noise.to(device=device, dtype=torch.float))
-    # without discrinimator
-    if discriminator is None:
-        loss = F.mse_loss(torch.unsqueeze(predict1, 1), clean.to(device=device, dtype=torch.float))
-        loss.backward()
-        optimizer.step()
-        return loss.item()
-    else:
-        # generator
-        optimizer.zero_grad()
-        disc_fake = discriminator(predict1)
-        disc_real = discriminator(clean.to(device=device, dtype=torch.float))
-        loss = 0
-        for (feats_fake, score_fake), (feats_real, _) in zip(disc_fake, disc_real):
-            loss += torch.mean(torch.sum(torch.pow(score_fake - 1.0, 2), dim=[1, 2]))
-            for feat_f, feat_r in zip(feats_fake, feats_real):
-                loss += 100 * torch.mean(torch.abs(feat_f - feat_r))
-                #loss += 100 * F.mse_loss(feat_f, feat_r)
-        loss.backward()
-        optimizer.step()
-
-        # discriminator
-        optimizer_disc.zero_grad()
-        disc_fake = discriminator(predict1.detach())
-        disc_real = discriminator(clean.to(device=device, dtype=torch.float))
-        discrim_loss = 0
-        for (_, score_fake), (_, score_real) in zip(disc_fake, disc_real):
-            discrim_loss += torch.mean(torch.sum(torch.pow(score_real - 1.0, 2), dim=[1, 2]))
-            discrim_loss += torch.mean(torch.sum(torch.pow(score_fake, 2), dim=[1, 2]))
-        discrim_loss.backward()
-        optimizer_disc.step()
-        return loss.item(), discrim_loss.item()
-def test_SEANet(model, acc, noise, clean, device='cuda', text=None):
-    predict1, predict2 = model(acc.to(device=device, dtype=torch.float), noise.to(device=device, dtype=torch.float))
-    clean = clean.squeeze(1).numpy()
-    predict = predict1.cpu().numpy()
-    return eval(clean, predict, text)

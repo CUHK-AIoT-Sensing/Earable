@@ -10,3 +10,4 @@ vibvoice/plot/
 *.npy
 *.json
 *.png
+*.pyc

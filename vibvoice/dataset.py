@@ -141,10 +141,6 @@ class BaseDataset:
                 data /= 2 ** 14
                 b, a = signal.butter(4, 80, 'highpass', fs=self.sample_rate)
                 data = signal.filtfilt(b, a, data, axis=0)
-
-                b, a = signal.butter(4, 200, 'lowpass', fs=self.sample_rate)
-                data = signal.filtfilt(b, a, data, axis=0)
-
                 data = np.clip(data, -0.05, 0.05)
             else:
                 data, sr = ta.load(file, frame_offset=offset * self.sample_rate, num_frames=duration * self.sample_rate)
@@ -152,7 +148,7 @@ class BaseDataset:
             return data, file
 class NoisyCleanSet:
     def __init__(self, json_paths, text=False, person=None, simulation=False, ratio=1, snr=(0, 20),
-                 rir=None, dvector=None):
+                 rir=None):
         '''
         :param json_paths: speech (clean), noisy/ added noise, IMU (optional)
         :param text: whether output the text, only apply to Sentences
@@ -167,14 +163,6 @@ class NoisyCleanSet:
         self.simulation = simulation
         self.text = text
         self.snr_list = np.arange(snr[0], snr[1], 1)
-        if dvector is None:
-            self.dvector = dvector
-        else:
-            people = os.listdir(dvector)
-            self.dvector = {}
-            for p in people:
-                x = np.load(os.path.join(dvector, p))
-                self.dvector[p.split('.')[0]] = x
         if len(json_paths) == 2:
             # only clean + noise
             self.augmentation = True
@@ -220,15 +208,7 @@ class NoisyCleanSet:
         else:
             noise, _ = self.dataset[1][index]
         data = [clean.astype(np.float32), noise.astype(np.float32)]
-        if self.dvector is not None:
-            spk = file.split('/')[-3]
-            vectors = self.dvector[spk]
-            r_idx = np.random.randint(0, vectors.shape[0])
-            vector = vectors[r_idx]
-            # vector = np.concatenate([vector, noise[:16000]])
-            data.append(vector.astype(np.float32))
-        elif not self.augmentation:
-            # We have two kind of additional signal 1) Accelerometer 2) speaker embeddings (More coming soon)
+        if not self.augmentation:
             acc, _ = self.dataset[2][index]
             acc = np.transpose(acc)
             data.append(acc.astype(np.float32))

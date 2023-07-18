@@ -11,8 +11,7 @@ def synthetic(clean, transfer_function, N):
     time_bin = clean.shape[-1]
     index = np.random.randint(0, N)
     f = transfer_function[index, :, 0]
-    f = f / np.max(f)
-    v = transfer_function[index, :, 1] / np.max(f)
+    v = transfer_function[index, :, 1]
     response = np.tile(np.expand_dims(f, axis=1), (1, time_bin))
     for j in range(time_bin):
         response[:, j] += np.random.normal(0, v, (freq_bin_high))
