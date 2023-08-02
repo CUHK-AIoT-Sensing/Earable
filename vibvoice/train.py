@@ -93,9 +93,9 @@ if __name__ == "__main__":
     people = ["hou", "1", "2", "3", "4", "5", "6", "7", "8", "yan", "wu", "liang", "shuai", "shi", "he"]
     if args.mode == 0:
         # This script is for model pre-training on LibriSpeech
-        BATCH_SIZE = 64
-        lr = 0.0001
-        EPOCH = 10
+        BATCH_SIZE = 32
+        lr = 0.0002
+        EPOCH = 30
         dataset = NoisyCleanSet(['json/librispeech-100.json', 'json/noises.json'], simulation=True,
                                 ratio=1, rir='json/rir.json')
         ckpt_best, loss_curve, metric_best = train(dataset, EPOCH, lr, BATCH_SIZE, model)
@@ -107,7 +107,7 @@ if __name__ == "__main__":
         # rir = None
         text_evaluation = False
         # start checkpoint
-        ckpt_mode = 1 
+        ckpt_mode = 2
         # per-user train or single-train: 0-per_user, 1-single_train, 2-just_test
         train_mode = 1
 
@@ -120,7 +120,7 @@ if __name__ == "__main__":
             ckpt_start = torch.load(ckpt_name)
         else:
             ckpt_dir = 'pretrain/crn'
-            ckpt_name = ckpt_dir + '/' + sorted(os.listdir(ckpt_dir))[-1]
+            ckpt_name = ckpt_dir + '/' + sorted(os.listdir(ckpt_dir))[0]
             ckpt_start = torch.load(ckpt_name)
         print('loaded checkpoint:', ckpt_name)
 

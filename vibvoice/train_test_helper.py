@@ -37,6 +37,7 @@ def OverlapAndAdd(inputs,frame_shift):
             start = start + frame_step
             end = start + frame_size
         return sig / ones
+
 def synthetic(clean):
     time_bin = clean.shape[-1]
     index = np.random.randint(0, length_transfer_function)
@@ -46,7 +47,7 @@ def synthetic(clean):
     for j in range(time_bin):
         response[:, j] += np.random.normal(0, v, (freq_bin_high))
     acc = torch.from_numpy(response / np.max(f)).to(clean.device) * clean[:, :freq_bin_high, :]
-    acc = clean[:, :freq_bin_high, :]
+    #acc = clean[:, :freq_bin_high, :]
     return acc
 def eval(clean, predict, text=None):
     if text is not None:
@@ -76,9 +77,6 @@ def Spectral_Loss(x_mag, y_mag):
 def train_TCNN(model, acc, noise, clean, optimizer, device='cuda'):
     optimizer.zero_grad()
     predict = model(noise.to(device).unsqueeze(1))
-    #spec_predict = torch.stft(predict, 640, 320, 640, window=torch.hann_window(640, device=predict.device), return_complex=True).abs()
-    #spec_clean = torch.stft(clean, 640, 320, 640, window=torch.hann_window(640, device=clean.device), return_complex=True).abs().to(device)
-    # loss = Spectral_Loss(spec_clean, spec_predict)
     loss = F.mse_loss(predict.squeeze(1), clean.to(device).unfold(-1, 640, 320))
     loss.backward()
     optimizer.step()
