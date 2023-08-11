@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .vibvoice import synthetic
-from .tcnn import TCNN_Block
+from .dual_rnn import Dual_RNN_Block
 import numpy as np
 
 class CausalConvBlock(nn.Module):
@@ -86,12 +86,9 @@ class CRN(nn.Module):
 
         # LSTM
         # self.lstm_layer = nn.LSTM(input_size=256*9, hidden_size=256*9, num_layers=2, batch_first=True)
-        # TCM
-        # self.TCNN_Block_1 = TCNN_Block(in_channels=256*9, out_channels=1024, kernel_size=3, init_dilation=2, num_layers=3)
-        # self.TCNN_Block_2 = TCNN_Block(in_channels=256*9, out_channels=1024, kernel_size=3, init_dilation=2, num_layers=3)
-        # self.TCNN_Block_3 = TCNN_Block(in_channels=256*9, out_channels=1024, kernel_size=3, init_dilation=2, num_layers=3)
+        self.lstm_layer = Dual_RNN_Block(256, 256, 'GRU')
 
-        self.tran_conv_block_1 = CausalTransConvBlock(0 + 256, 128)
+        self.tran_conv_block_1 = CausalTransConvBlock(256 + 256, 128)
         self.tran_conv_block_2 = CausalTransConvBlock(128 + 128, 64)
         self.tran_conv_block_3 = CausalTransConvBlock(64 + 64, 32)
         self.tran_conv_block_4 = CausalTransConvBlock(32 + 32, 16, output_padding=(1, 0))
@@ -108,7 +105,6 @@ class CRN(nn.Module):
     def forward(self, x, acc):
         x = torch.unsqueeze(x, 1)
         acc = torch.unsqueeze(acc, 1)
-        # self.lstm_layer.flatten_parameters()
 
         acc = self.acc_enhancement(acc)
         pad_acc = torch.nn.functional.pad(acc, (0, 0, 0, 321 - 33))
@@ -124,17 +120,10 @@ class CRN(nn.Module):
         # lstm_out, _ = self.lstm_layer(lstm_in)  # [2, 200, 1024]
         # lstm_out = lstm_out.permute(0, 2, 1).reshape(batch_size, n_channels, n_f_bins, n_frame_size)  # [2, 256, 4, 200]
 
-        # batch_size, C, frame_len, frame_num = e_5.shape
-        # reshape_1 = e_5.reshape(batch_size, C * frame_len, frame_num)
+        lstm_out = self.lstm_layer(e_5)
+        # d_1 = self.tran_conv_block_1(e_5)
 
-        # TCNN_Block_1 = self.TCNN_Block_1(reshape_1)
-        # TCNN_Block_2 = self.TCNN_Block_2(TCNN_Block_1)
-        # TCNN_Block_3 = self.TCNN_Block_3(TCNN_Block_2)
-
-        # reshape_2 = TCNN_Block_3.reshape(batch_size, C, frame_len, frame_num)
-
-        # d_1 = self.tran_conv_block_1(torch.cat((lstm_out, e_5), 1))
-        d_1 = self.tran_conv_block_1(e_5)
+        d_1 = self.tran_conv_block_1(torch.cat((lstm_out, e_5), 1))
         d_2 = self.tran_conv_block_2(torch.cat((d_1, e_4), 1))
         d_3 = self.tran_conv_block_3(torch.cat((d_2, e_3), 1))
         d_4 = self.tran_conv_block_4(torch.cat((d_3, e_2), 1))
