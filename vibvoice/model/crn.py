@@ -1,69 +1,11 @@
+'''
+based on CRUSE
+'''
 import torch
 import torch.nn as nn
 from .vibvoice import synthetic
-from .dual_rnn import Dual_RNN_Block
+from .base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
 import numpy as np
-
-class CausalConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.conv = nn.Conv2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=(3, 2),
-            stride=(2, 1),
-            padding=(0, 1)
-        )
-        self.norm = nn.BatchNorm2d(num_features=out_channels)
-        self.activation = nn.ELU()
-
-    def forward(self, x):
-        """
-        2D Causal convolution.
-        Args:
-            x: [B, C, F, T]
-
-        Returns:
-            [B, C, F, T]
-        """
-        x = self.conv(x)
-        x = x[:, :, :, :-1]  # chomp size
-        x = self.norm(x)
-        x = self.activation(x)
-        return x
-
-
-class CausalTransConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, is_last=False, output_padding=(0, 0)):
-        super().__init__()
-        self.conv = nn.ConvTranspose2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=(3, 2),
-            stride=(2, 1),
-            output_padding=output_padding
-        )
-        self.norm = nn.BatchNorm2d(num_features=out_channels)
-        if is_last:
-            self.activation = nn.Sigmoid()
-        else:
-            self.activation = nn.ELU()
-
-    def forward(self, x):
-        """
-        2D Causal convolution.
-        Args:
-            x: [B, C, F, T]
-
-        Returns:
-            [B, C, F, T]
-        """
-        x = self.conv(x)
-        x = x[:, :, :, :-1]  # chomp size
-        x = self.norm(x)
-        x = self.activation(x)
-        return x
-
 
 class CRN(nn.Module):
     """
@@ -103,8 +45,6 @@ class CRN(nn.Module):
         return acc      
 
     def forward(self, x, acc):
-        x = torch.unsqueeze(x, 1)
-        acc = torch.unsqueeze(acc, 1)
 
         acc = self.acc_enhancement(acc)
         pad_acc = torch.nn.functional.pad(acc, (0, 0, 0, 321 - 33))

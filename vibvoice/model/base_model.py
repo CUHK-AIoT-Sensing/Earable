@@ -1,3 +1,9 @@
+'''
+contains base model:
+1. fullsubnet (BaseModel)
+2. Dual-RNN
+3. causal conv
+'''
 import torch
 import torch.nn as nn
 import torch.nn.init as init
@@ -450,3 +456,223 @@ class BaseModel(nn.Module):
                     init.orthogonal_(param.data)
                 else:
                     init.normal_(param.data)
+
+class GlobalLayerNorm(nn.Module):
+    '''
+       Calculate Global Layer Normalization
+       dim: (int or list or torch.Size) –
+          input shape from an expected input of size
+       eps: a value added to the denominator for numerical stability.
+       elementwise_affine: a boolean value that when set to True, 
+          this module has learnable per-element affine parameters 
+          initialized to ones (for weights) and zeros (for biases).
+    '''
+
+    def __init__(self, dim, shape, eps=1e-8, elementwise_affine=True):
+        super(GlobalLayerNorm, self).__init__()
+        self.dim = dim
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+
+        if self.elementwise_affine:
+            if shape == 3:
+                self.weight = nn.Parameter(torch.ones(self.dim, 1))
+                self.bias = nn.Parameter(torch.zeros(self.dim, 1))
+            if shape == 4:
+                self.weight = nn.Parameter(torch.ones(self.dim, 1, 1))
+                self.bias = nn.Parameter(torch.zeros(self.dim, 1, 1))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+
+    def forward(self, x):
+        # x = N x C x K x S or N x C x L
+        # N x 1 x 1
+        # cln: mean,var N x 1 x K x S
+        # gln: mean,var N x 1 x 1
+        if x.dim() == 4:
+            mean = torch.mean(x, (1, 2, 3), keepdim=True)
+            var = torch.mean((x-mean)**2, (1, 2, 3), keepdim=True)
+            if self.elementwise_affine:
+                x = self.weight*(x-mean)/torch.sqrt(var+self.eps)+self.bias
+            else:
+                x = (x-mean)/torch.sqrt(var+self.eps)
+        if x.dim() == 3:
+            mean = torch.mean(x, (1, 2), keepdim=True)
+            var = torch.mean((x-mean)**2, (1, 2), keepdim=True)
+            if self.elementwise_affine:
+                x = self.weight*(x-mean)/torch.sqrt(var+self.eps)+self.bias
+            else:
+                x = (x-mean)/torch.sqrt(var+self.eps)
+        return x
+
+
+class CumulativeLayerNorm(nn.LayerNorm):
+    '''
+       Calculate Cumulative Layer Normalization
+       dim: you want to norm dim
+       elementwise_affine: learnable per-element affine parameters 
+    '''
+
+    def __init__(self, dim, elementwise_affine=True):
+        super(CumulativeLayerNorm, self).__init__(
+            dim, elementwise_affine=elementwise_affine, eps=1e-8)
+
+    def forward(self, x):
+        # x: N x C x K x S or N x C x L
+        # N x K x S x C
+        if x.dim() == 4:
+           x = x.permute(0, 2, 3, 1).contiguous()
+           # N x K x S x C == only channel norm
+           x = super().forward(x)
+           # N x C x K x S
+           x = x.permute(0, 3, 1, 2).contiguous()
+        if x.dim() == 3:
+            x = torch.transpose(x, 1, 2)
+            # N x L x C == only channel norm
+            x = super().forward(x)
+            # N x C x L
+            x = torch.transpose(x, 1, 2)
+        return x
+
+
+def select_norm(norm, dim, shape):
+    if norm == 'gln':
+        return GlobalLayerNorm(dim, shape, elementwise_affine=True)
+    if norm == 'cln':
+        return CumulativeLayerNorm(dim, elementwise_affine=True)
+    if norm == 'ln':
+        return nn.GroupNorm(1, dim, eps=1e-8)
+    else:
+        return nn.BatchNorm1d(dim)
+    
+class Dual_RNN_Block(nn.Module):
+    '''
+       Implementation of the intra-RNN and the inter-RNN
+       input:
+            in_channels: The number of expected features in the input x
+            out_channels: The number of features in the hidden state h
+            rnn_type: RNN, LSTM, GRU
+            norm: gln = "Global Norm", cln = "Cumulative Norm", ln = "Layer Norm"
+            dropout: If non-zero, introduces a Dropout layer on the outputs 
+                     of each LSTM layer except the last layer, 
+                     with dropout probability equal to dropout. Default: 0
+            bidirectional: If True, becomes a bidirectional LSTM. Default: False
+    '''
+
+    def __init__(self, out_channels,
+                 hidden_channels, rnn_type='LSTM', norm='ln',
+                 dropout=0, bidirectional=False, num_spks=2):
+        super(Dual_RNN_Block, self).__init__()
+        # RNN model
+        self.intra_rnn = getattr(nn, rnn_type)(
+            out_channels, hidden_channels//2, 1, batch_first=True, dropout=dropout, bidirectional=True)
+        self.inter_rnn = getattr(nn, rnn_type)(
+            out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
+        # Norm
+        self.intra_norm = select_norm(norm, out_channels, 4)
+        self.inter_norm = select_norm(norm, out_channels, 4)
+        # Linear
+        self.intra_linear = nn.Linear(
+            hidden_channels*2 if bidirectional else hidden_channels, out_channels)
+        self.inter_linear = nn.Linear(
+            hidden_channels*2 if bidirectional else hidden_channels, out_channels)
+        
+
+    def forward(self, x):
+        '''
+           x: [B, N, K, S] Batch, feature, frequency, time
+           out: [Spks, B, N, K, S]
+        '''
+        B, N, K, S = x.shape
+        # intra RNN
+        # [BS, K, N]
+        intra_rnn = x.permute(0, 3, 2, 1).contiguous().view(B*S, K, N)
+        # [BS, K, H]
+        intra_rnn, _ = self.intra_rnn(intra_rnn)
+        # [BS, K, N]
+        intra_rnn = self.intra_linear(intra_rnn.contiguous().view(B*S*K, -1)).view(B*S, K, -1)
+        # [B, S, K, N]
+        intra_rnn = intra_rnn.view(B, S, K, N)
+        # [B, N, K, S]
+        intra_rnn = intra_rnn.permute(0, 3, 2, 1).contiguous()
+        intra_rnn = self.intra_norm(intra_rnn)
+        
+        # [B, N, K, S]
+        intra_rnn = intra_rnn + x
+
+        # inter RNN
+        # [BK, S, N]
+        inter_rnn = intra_rnn.permute(0, 2, 3, 1).contiguous().view(B*K, S, N)
+        # [BK, S, H]
+        inter_rnn, _ = self.inter_rnn(inter_rnn)
+        # [BK, S, N]
+        inter_rnn = self.inter_linear(inter_rnn.contiguous().view(B*S*K, -1)).view(B*K, S, -1)
+        # [B, K, S, N]
+        inter_rnn = inter_rnn.view(B, K, S, N)
+        # [B, N, K, S]
+        inter_rnn = inter_rnn.permute(0, 3, 1, 2).contiguous()
+        inter_rnn = self.inter_norm(inter_rnn)
+        # [B, N, K, S]
+        out = inter_rnn + intra_rnn
+
+        return out
+class CausalConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=(3, 2),
+            stride=(2, 1),
+            padding=(0, 1)
+        )
+        self.norm = nn.BatchNorm2d(num_features=out_channels)
+        self.activation = nn.ELU()
+
+    def forward(self, x):
+        """
+        2D Causal convolution.
+        Args:
+            x: [B, C, F, T]
+
+        Returns:
+            [B, C, F, T]
+        """
+        x = self.conv(x)
+        x = x[:, :, :, :-1]  # chomp size
+        x = self.norm(x)
+        x = self.activation(x)
+        return x
+
+
+class CausalTransConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, is_last=False, output_padding=(0, 0)):
+        super().__init__()
+        self.conv = nn.ConvTranspose2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=(3, 2),
+            stride=(2, 1),
+            output_padding=output_padding
+        )
+        self.norm = nn.BatchNorm2d(num_features=out_channels)
+        if is_last:
+            self.activation = nn.Sigmoid()
+        else:
+            self.activation = nn.ELU()
+
+    def forward(self, x):
+        """
+        2D Causal convolution.
+        Args:
+            x: [B, C, F, T]
+
+        Returns:
+            [B, C, F, T]
+        """
+        x = self.conv(x)
+        x = x[:, :, :, :-1]  # chomp size
+        x = self.norm(x)
+        x = self.activation(x)
+        return x
