@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from .vibvoice import synthetic
 from .base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
+from .skip_rnn import Skip_Dual_RNN_Blockclass  
 import numpy as np
 
 class CRN(nn.Module):
@@ -13,28 +14,47 @@ class CRN(nn.Module):
     Output: [batch size, T, n_fft]
     """
 
-    def __init__(self):
+    def __init__(self, add=True ):
         super(CRN, self).__init__()
+        self.add = add
+        channel_list = [16, 32, 64, 128, 256 ]
         self.vib_conv1 = CausalConvBlock(1, 16)
         self.vib_conv2 = CausalConvBlock(16, 32)
         self.vib_transconv1 = CausalTransConvBlock(32, 16, output_padding=(1, 0))
         self.vib_transconv2 = CausalTransConvBlock(16, 1, is_last=True)
+
         # Encoder
-        self.conv_block_1 = CausalConvBlock(3, 16)
-        self.conv_block_2 = CausalConvBlock(16, 32)
-        self.conv_block_3 = CausalConvBlock(32, 64)
-        self.conv_block_4 = CausalConvBlock(64, 128)
-        self.conv_block_5 = CausalConvBlock(128, 256)
+        layers = []
+        for i in range(len(channel_list)):
+            if i == 0:
+                layers.append(CausalConvBlock(2, channel_list[i]))
+            else:
+                layers.append(CausalConvBlock(channel_list[i-1], channel_list[i]))
+        self.conv_blocks = nn.ModuleList(layers)
 
         # LSTM
         # self.lstm_layer = nn.LSTM(input_size=256*9, hidden_size=256*9, num_layers=2, batch_first=True)
-        self.lstm_layer = Dual_RNN_Block(256, 256, 'GRU')
+        self.lstm_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], 'GRU', bidirectional=True  )
+        # self.lstm_layer = Skip_Dual_RNN_Blockclass(256, 256, 'GRU')
 
-        self.tran_conv_block_1 = CausalTransConvBlock(256 + 256, 128)
-        self.tran_conv_block_2 = CausalTransConvBlock(128 + 128, 64)
-        self.tran_conv_block_3 = CausalTransConvBlock(64 + 64, 32)
-        self.tran_conv_block_4 = CausalTransConvBlock(32 + 32, 16, output_padding=(1, 0))
-        self.tran_conv_block_5 = CausalTransConvBlock(16 + 16, 1, is_last=True)
+        if self.add:
+            num_c = 1
+            layers = []
+            for i in range(len(channel_list)-1, -1, -1):
+                layers.append(nn.Conv2d(channel_list[i], channel_list[i], kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)))
+            self.skip_convs = nn.ModuleList(layers)
+        else:
+            num_c = 2
+        
+        layers = []
+        for i in range(len(channel_list)-1, -1, -1):
+            if i == 0:
+                layers.append(CausalTransConvBlock(channel_list[i]*num_c, 1, is_last=True))
+            elif i == 1:
+                layers.append(CausalTransConvBlock(channel_list[i]*num_c, channel_list[i-1], output_padding=(1, 0)))
+            else:
+                layers.append(CausalTransConvBlock(channel_list[i]*num_c, channel_list[i-1]))
+        self.trans_conv_blocks = nn.ModuleList(layers)
 
     def acc_enhancement(self, acc):
         e_1 = self.vib_conv1(acc)
@@ -47,12 +67,13 @@ class CRN(nn.Module):
     def forward(self, x, acc):
 
         acc = self.acc_enhancement(acc)
-        pad_acc = torch.nn.functional.pad(acc, (0, 0, 0, 321 - 33))
-        e_1 = self.conv_block_1(torch.cat((x, pad_acc, (x+pad_acc)/2), 1))
-        e_2 = self.conv_block_2(e_1)
-        e_3 = self.conv_block_3(e_2)
-        e_4 = self.conv_block_4(e_3)
-        e_5 = self.conv_block_5(e_4)  # [2, 256, 4, 200]
+        pad_acc = torch.nn.functional.pad(acc, (0, 0, 0, x.shape[-2] - acc.shape[-2]))
+
+        Res = []
+        d = torch.cat((x, pad_acc), 1)
+        for layer in self.conv_blocks:
+            d = layer(d)
+            Res.append(d)
 
         # batch_size, n_channels, n_f_bins, n_frame_size = e_5.shape
         # # [2, 256, 4, 200] = [2, 1024, 200] => [2, 200, 1024]
@@ -60,28 +81,14 @@ class CRN(nn.Module):
         # lstm_out, _ = self.lstm_layer(lstm_in)  # [2, 200, 1024]
         # lstm_out = lstm_out.permute(0, 2, 1).reshape(batch_size, n_channels, n_f_bins, n_frame_size)  # [2, 256, 4, 200]
 
-        lstm_out = self.lstm_layer(e_5)
-        # d_1 = self.tran_conv_block_1(e_5)
+        d = self.lstm_layer(d)
 
-        d_1 = self.tran_conv_block_1(torch.cat((lstm_out, e_5), 1))
-        d_2 = self.tran_conv_block_2(torch.cat((d_1, e_4), 1))
-        d_3 = self.tran_conv_block_3(torch.cat((d_2, e_3), 1))
-        d_4 = self.tran_conv_block_4(torch.cat((d_3, e_2), 1))
-        d_5 = self.tran_conv_block_5(torch.cat((d_4, e_1), 1))
+        if self.add:
+            for layer, skip in zip(self.trans_conv_blocks, self.skip_convs):
+                d = layer(d + skip(Res.pop()))
+        else:
+            for layer in self.trans_conv_blocks:
+                d = layer(torch.cat((d, Res.pop()), 1))
 
-        return d_5 * x, acc
+        return d * x, acc
 
-
-    
-if __name__ == '__main__':
-    model = CRN()
-    
-    def constructor(resolution):
-        audio = torch.rand(1, 321, 150)
-        acc = torch.rand(1, 33, 150)
-        return dict(x=audio, acc=acc)
-    from ptflops import get_model_complexity_info
-    macs, params = get_model_complexity_info(model, input_res=(1, 321, 150), as_strings=True, input_constructor=constructor,
-                                           print_per_layer_stat=True, verbose=True)
-    print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
-    print('{:<30}  {:<8}'.format('Number of parameters: ', params))

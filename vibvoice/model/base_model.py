@@ -562,22 +562,59 @@ class Dual_RNN_Block(nn.Module):
 
     def __init__(self, out_channels,
                  hidden_channels, rnn_type='LSTM', norm='ln',
-                 dropout=0, bidirectional=False, num_spks=2):
+                 dropout=0, bidirectional=False):
         super(Dual_RNN_Block, self).__init__()
         # RNN model
         self.intra_rnn = getattr(nn, rnn_type)(
-            out_channels, hidden_channels//2, 1, batch_first=True, dropout=dropout, bidirectional=True)
+            out_channels, hidden_channels//2 if bidirectional else hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
         self.inter_rnn = getattr(nn, rnn_type)(
-            out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
+            out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=False)
         # Norm
         self.intra_norm = select_norm(norm, out_channels, 4)
         self.inter_norm = select_norm(norm, out_channels, 4)
         # Linear
-        self.intra_linear = nn.Linear(
-            hidden_channels*2 if bidirectional else hidden_channels, out_channels)
-        self.inter_linear = nn.Linear(
-            hidden_channels*2 if bidirectional else hidden_channels, out_channels)
-        
+        self.intra_linear = nn.Linear(hidden_channels, out_channels)
+        self.inter_linear = nn.Linear(hidden_channels, out_channels)
+
+    def causal_forward(self, x, cache=[None, None]):
+        '''
+           x: [B, N, K, 1] Batch, feature, frequency, time
+           out: [B, N, K, 1]
+        '''
+        B, N, K, S = x.shape
+        # intra RNN
+        # [BS, K, N]
+        intra_rnn = x.permute(0, 3, 2, 1).contiguous().view(B*S, K, N)
+        # [BS, K, H]
+        intra_rnn, _ = self.intra_rnn(intra_rnn, cache[0])
+        cache[0] = intra_rnn
+        # [BS, K, N]
+        intra_rnn = self.intra_linear(intra_rnn.contiguous().view(B*S*K, -1)).view(B*S, K, -1)
+        # [B, S, K, N]
+        intra_rnn = intra_rnn.view(B, S, K, N)
+        # [B, N, K, S]
+        intra_rnn = intra_rnn.permute(0, 3, 2, 1).contiguous()
+        intra_rnn = self.intra_norm(intra_rnn)
+        # [B, N, K, S]
+        intra_rnn = intra_rnn + x
+
+        # inter RNN
+        # [BK, S, N]
+        inter_rnn = intra_rnn.permute(0, 2, 3, 1).contiguous().view(B*K, S, N)
+        # [BK, S, H]
+        inter_rnn, _ = self.inter_rnn(inter_rnn, cache[1])
+        cache[1] = inter_rnn
+        # [BK, S, N]
+        inter_rnn = self.inter_linear(inter_rnn.contiguous().view(B*S*K, -1)).view(B*K, S, -1)
+        # [B, K, S, N]
+        inter_rnn = inter_rnn.view(B, K, S, N)
+        # [B, N, K, S]
+        inter_rnn = inter_rnn.permute(0, 3, 1, 2).contiguous()
+        inter_rnn = self.inter_norm(inter_rnn)
+        # [B, N, K, S]
+        out = inter_rnn + intra_rnn
+
+        return out, cache
 
     def forward(self, x):
         '''
@@ -597,7 +634,6 @@ class Dual_RNN_Block(nn.Module):
         # [B, N, K, S]
         intra_rnn = intra_rnn.permute(0, 3, 2, 1).contiguous()
         intra_rnn = self.intra_norm(intra_rnn)
-        
         # [B, N, K, S]
         intra_rnn = intra_rnn + x
 
