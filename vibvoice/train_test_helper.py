@@ -2,9 +2,7 @@ import torch
 import numpy as np
 from evaluation import batch_pesq, SI_SDR, batch_stoi, eval_ASR, LSD
 import torch.nn.functional as F
-from scipy import signal
-from mask import build_complex_ideal_ratio_mask, decompress_cIRM
-from feature import stft, istft
+from feature import stft, istft, build_complex_ideal_ratio_mask, decompress_cIRM
 # from speechbrain.pretrained import EncoderDecoderASR
 '''
 This script contains 4 model's training and test due to their large differences (for concise)

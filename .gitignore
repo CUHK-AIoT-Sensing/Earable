@@ -3,6 +3,8 @@ vibvoice/transfer_function/
 vibvoice/vis/
 vibvoice/json/
 vibvoice/plot/
+ABCS_database/
+EMSB/
 *.wav
 *.pth
 *.ckpt

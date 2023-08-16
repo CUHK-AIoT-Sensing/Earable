@@ -6,6 +6,7 @@ import torch.nn as nn
 from .vibvoice import synthetic
 from .base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
 from .skip_rnn import Skip_Dual_RNN_Blockclass  
+from .vad import VAD
 import numpy as np
 
 class CRN(nn.Module):
@@ -18,10 +19,7 @@ class CRN(nn.Module):
         super(CRN, self).__init__()
         self.add = add
         channel_list = [16, 32, 64, 128, 256 ]
-        self.vib_conv1 = CausalConvBlock(1, 16)
-        self.vib_conv2 = CausalConvBlock(16, 32)
-        self.vib_transconv1 = CausalTransConvBlock(32, 16, output_padding=(1, 0))
-        self.vib_transconv2 = CausalTransConvBlock(16, 1, is_last=True)
+        self.vad = VAD()
 
         # Encoder
         layers = []
@@ -56,17 +54,9 @@ class CRN(nn.Module):
                 layers.append(CausalTransConvBlock(channel_list[i]*num_c, channel_list[i-1]))
         self.trans_conv_blocks = nn.ModuleList(layers)
 
-    def acc_enhancement(self, acc):
-        e_1 = self.vib_conv1(acc)
-        e_2 = self.vib_conv2(e_1)
-        d_1 = self.vib_transconv1(e_2)
-        d_2 = self.vib_transconv2(d_1)
-        acc = d_2 * acc
-        return acc      
-
     def forward(self, x, acc):
 
-        acc = self.acc_enhancement(acc)
+        acc, vad = self.vad(acc)
         pad_acc = torch.nn.functional.pad(acc, (0, 0, 0, x.shape[-2] - acc.shape[-2]))
 
         Res = []

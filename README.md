@@ -103,5 +103,12 @@ The repo has been tested on Ubuntu 20.04 with two RTX 3090 GPUs, the repo has be
 # Citation
 The code of this project are made available for non-commercial, academic research only. If you would like to use the code of this project, please cite the following paper:
 ```
+@inproceedings{he2023towards,
+  title={Towards Bone-Conducted Vibration Speech Enhancement on Head-Mounted Wearables},
+  author={He, Lixing and Hou, Haozheng and Shi, Shuyao and Shuai, Xian and Yan, Zhenyu},
+  booktitle={Proceedings of the 21st Annual International Conference on Mobile Systems, Applications and Services},
+  pages={14--27},
+  year={2023}
+}
 ```
     
