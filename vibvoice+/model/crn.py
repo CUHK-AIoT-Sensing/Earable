@@ -56,7 +56,7 @@ class CRN(nn.Module):
 
     def forward(self, x, acc):
 
-        acc, vad = self.vad(acc)
+        vad = self.vad(acc)
         pad_acc = torch.nn.functional.pad(acc, (0, 0, 0, x.shape[-2] - acc.shape[-2]))
 
         Res = []

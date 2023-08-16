@@ -111,7 +111,7 @@ class BaseDataset:
         self.sample_rate = sample_rate
         self.length = length
         self.stride = stride
-        for info in self.files:
+        for info in files:
             _, file_length = info
             if self.length is None:
                 examples = 1
@@ -130,21 +130,10 @@ class BaseDataset:
             if index >= examples:
                 index -= examples
                 continue
-            duration = 0
-            offset = 0
-            if self.length:
-                offset = self.stride * index
-                duration = self.length
-            if file[-3:] == 'txt':
-                data = np.loadtxt(file)
-                data = data[offset * self.sample_rate: (offset + duration) * self.sample_rate, :]
-                data /= 2 ** 14
-                b, a = signal.butter(4, 80, 'highpass', fs=self.sample_rate)
-                data = signal.filtfilt(b, a, data, axis=0)
-                data = np.clip(data, -0.05, 0.05)
-            else:
-                data, sr = ta.load(file, frame_offset=offset * self.sample_rate, num_frames=duration * self.sample_rate)
-                data = data[0].numpy()
+            offset = self.stride * index
+            duration = self.length
+            data, sr = librosa.load(file, sr=None, mono=False, offset=offset, duration=duration)
+            # data, sr = ta.load(file, frame_offset=offset * self.sample_rate, num_frames=duration * self.sample_rate)
             return data, file
 class NoisyCleanSet:
     def __init__(self, json_paths, text=False, person=None, simulation=False, ratio=1, snr=(0, 20),
@@ -219,71 +208,86 @@ class NoisyCleanSet:
     def __len__(self):
         return len(self.dataset[0])
 class EMSBDataset:
-    def __init__(self, json_paths, text=False, person=None, simulation=False, time_domain=False,
-                 ratio=1, snr=(0, 20), rir='json/rir_noise.json'):
-        '''
-        :param json_paths: speech (clean), noisy/ added noise, IMU (optional)
-        :param text: whether output the text, only apply to Sentences
-        :param person: person we want to involve
-        :param simulation: whether the noise is simulation
-        :param time_domain: use frequency domain (complex) or time domain
-        :param ratio: ratio of the data we use
-        :param snr: SNR range of the synthetic dataset
-        '''
+    def __init__(self, emsb, noise=None, simulation=False, mono=False, ratio=1, snr=(0, 20), rir=None):
         self.dataset = []
+        self.mono = mono
         self.ratio = ratio
         self.simulation = simulation
-        self.text = text
-        self.time_domain = time_domain
         self.snr_list = np.arange(snr[0], snr[1], 1)
         sr = 16000
-        for i, path in enumerate(json_paths):
-            with open(path, 'r') as f:
-                data = json.load(f)
-                if person is not None and isinstance(data, dict):
-                    datasets = []
-                    for p in person:
-                        dataset = BaseDataset(data[p], sample_rate=sr)
-                        size1 = int(len(dataset) * self.ratio)
-                        size2 = len(dataset) - size1
-                        dataset, _ = torch.utils.data.random_split(dataset, [size1, size2])
-                        datasets.append(dataset)
-                    dataset = torch.utils.data.ConcatDataset(datasets)
-                else:
-                    if ratio > 0:
-                        data = data[:int(len(data) * self.ratio)]
-                    else:
-                        data = data[int(len(data) * self.ratio):]
-                    dataset = BaseDataset(data, sample_rate=sr)
-            self.dataset.append(dataset)
+        with open(emsb, 'r') as f:
+            data = json.load(f)
+            left = data['left']; right = data['right']
+            if ratio > 0:
+                left = left[:int(len(data['left']) * self.ratio)]
+                right = right[:int(len(data['right']) * self.ratio)]
+            else:
+                left = left[-int(len(data['left']) * self.ratio):]
+                right = right[-int(len(data['right']) * self.ratio):]
+            self.left_dataset = BaseDataset(left, sample_rate=sr)
+            self.right_dataset = BaseDataset(right, sample_rate=sr)
+        self.noise_dataset = noise
+        if self.noise_dataset is not None:
+            self.noise_length = len(self.noise_dataset)
+
         self.rir = rir
         if self.rir is not None:
             with open(rir, 'r') as f:
                 data = json.load(f)
             self.rir = data
             self.rir_length = len(self.rir)
-        self.noise_length = len(self.dataset[1])
     def __getitem__(self, index):
-        data, file = self.dataset[0][index]
-        clean = data[0]
-        imu = data[1, ::10]
-        if self.simulation:
-            # use rir dataset to add noise
-            use_reverb = False if self.rir is None else bool(np.random.random(1) < 0.75)
-            noise, _ = self.dataset[1][np.random.randint(0, self.noise_length)]
-            snr = np.random.choice(self.snr_list)
-            noise, clean = snr_mix(noise, clean, snr, -25, 10,
-            rir = librosa.load(self.rir[np.random.randint(0, self.rir_length)][0], sr=rate_mic, mono=False)[0]
-            if use_reverb else None, eps=1e-6)
+        left, _ = self.left_dataset[index]
+        if self.mono:
+            clean = left[0]
+            imu = left[1]
         else:
-            noise, _ = self.dataset[1][index]
-        if self.text:
-            setence = sentences[int(file.split('/')[4][-1])-1]
-            return setence, imu, noise, clean
-        else:
-            return imu, noise, clean
+            right, _ = self.right_dataset[index]
+            clean = np.stack((left[0], right[0]), axis=0) 
+            imu = np.stack((left[1], right[1]), axis=0)
+
+        # if self.simulation:
+        #     # use rir dataset to add noise
+        #     use_reverb = False if self.rir is None else bool(np.random.random(1) < 0.75)
+        #     noise, _ = self.dataset[1][np.random.randint(0, self.noise_length)]
+        #     snr = np.random.choice(self.snr_list)
+        #     noise, clean = snr_mix(noise, clean, snr, -25, 10,
+        #     rir = librosa.load(self.rir[np.random.randint(0, self.rir_length)][0], sr=rate_mic, mono=False)[0]
+        #     if use_reverb else None, eps=1e-6)
+        # else:
+        #     noise, _ = self.dataset[1][index]
+        return imu, clean
     def __len__(self):
-        return len(self.dataset[0])
+        return len(self.left_dataset)
+class ABCSDataset:
+    def __init__(self, emsb, noise=None, simulation=False, snr=(0, 20), rir=None):
+        self.dataset = []
+        self.simulation = simulation
+        self.snr_list = np.arange(snr[0], snr[1], 1)
+        sr = 16000
+        with open(emsb, 'r') as f:
+            data = json.load(f)
+            left = []
+            for speaker in data.keys():
+                left += data[speaker]
+            self.left_dataset = BaseDataset(left, sample_rate=sr)
+        self.noise_dataset = noise
+        if self.noise_dataset is not None:
+            self.noise_length = len(self.noise_dataset)
+
+        self.rir = rir
+        if self.rir is not None:
+            with open(rir, 'r') as f:
+                data = json.load(f)
+            self.rir = data
+            self.rir_length = len(self.rir)
+    def __getitem__(self, index):
+        left, _ = self.left_dataset[index]
+        clean = left[0]
+        imu = left[1]
+        return imu, clean
+    def __len__(self):
+        return len(self.left_dataset)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', action="store", type=int, default=0, required=False,

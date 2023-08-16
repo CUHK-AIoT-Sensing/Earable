@@ -11,10 +11,10 @@ def latency_measure(model, data, device='cuda'):
     model.to(device)
     data = {k: v.to(device) for k, v in data.items()}
     starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-    repetitions = 300
+    repetitions = 100
     timings=np.zeros((repetitions,1))
     #GPU-WARM-UP
-    for _ in range(10):
+    for _ in range(50):
         _ = model(**data)
     # MEASURE PERFORMANCE
     t_start = time.time()
