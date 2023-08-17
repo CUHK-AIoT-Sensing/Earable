@@ -1,30 +1,26 @@
-import os
 import json
 import math
-import time
 
-import numpy as np
 import torch
+import numpy as np
 import torch.utils.data as Data
 import scipy.signal as signal
 import librosa
 from feature import norm_amplitude, tailor_dB_FS, is_clipped
 import soundfile as sf
-import torchaudio as ta
 import argparse
-rate_mic = 16000
-rate_imu = 1600
 length = 3
-stride = 3
+stride = 2
 
-
-sentences = [
-    "HAPPY NEW YEAR PROFESSOR AUSTIN NICE TO MEET YOU",
-    "WE WANT TO IMPROVE SPEECH QUALITY IN THIS PROJECT",
-    "BUT WE DON'T HAVE ENOUGH DATA TO TRAIN OUR MODEL",
-    "TRANSFER FUNCTION CAN BE A GOOD HELPER TO GENERATE DATA"
-]
-
+def vad_annotation(audio):
+    '''
+    according to "In-Ear-Voice: Towards Milli-Watt Audio Enhancement With Bone-Conduction Microphones for In-Ear Sensing Platforms, IoTDI'23"
+    '''
+    vad = np.zeros((audio.shape[0], audio.shape[1]//320+1), dtype=np.float32)
+    spec = np.abs(librosa.stft(audio, n_fft=640, hop_length=320, win_length=640)).mean(axis=1)
+    threshold = spec.min(axis=1, keepdims=True) + 0.3 * spec.mean(axis=1, keepdims=True)
+    vad[spec > threshold] = 1
+    return vad
 def snr_mix(noise_y, clean_y, snr, target_dB_FS, target_dB_FS_floating_value, rir=None, eps=1e-6):
         """
         Args:
@@ -68,7 +64,6 @@ def snr_mix(noise_y, clean_y, snr, target_dB_FS, target_dB_FS_floating_value, ri
             noisy_y = noisy_y / noisy_y_scalar
             clean_y = clean_y / noisy_y_scalar
         return noisy_y, clean_y
-
 class NoiseDataset:
     def __init__(self, files=None, sample_rate=16000, silence_length=0.2, target_length=3, num_noises=1):
         """
@@ -236,15 +231,19 @@ class EMSBDataset:
                 data = json.load(f)
             self.rir = data
             self.rir_length = len(self.rir)
+        
+        self.b, self.a = signal.butter(4, 100, 'highpass', fs=16000)
     def __getitem__(self, index):
         left, _ = self.left_dataset[index]
         if self.mono:
-            clean = left[0]
-            imu = left[1]
+            clean = np.expand_dims(left[0], 0)
+            imu = np.expand_dims(left[1], 0)
         else:
             right, _ = self.right_dataset[index]
             clean = np.stack((left[0], right[0]), axis=0) 
             imu = np.stack((left[1], right[1]), axis=0)
+        clean = np.ascontiguousarray(signal.filtfilt(self.b, self.a, clean, axis=1)).astype(np.float32)
+        imu = np.ascontiguousarray(signal.filtfilt(self.b, self.a, imu, axis=1)).astype(np.float32)
 
         # if self.simulation:
         #     # use rir dataset to add noise
@@ -256,7 +255,7 @@ class EMSBDataset:
         #     if use_reverb else None, eps=1e-6)
         # else:
         #     noise, _ = self.dataset[1][index]
-        return imu, clean
+        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean)}
     def __len__(self):
         return len(self.left_dataset)
 class ABCSDataset:
@@ -281,11 +280,16 @@ class ABCSDataset:
                 data = json.load(f)
             self.rir = data
             self.rir_length = len(self.rir)
+        self.b, self.a = signal.butter(4, 100, 'highpass', fs=16000)
+
     def __getitem__(self, index):
         left, _ = self.left_dataset[index]
-        clean = left[0]
-        imu = left[1]
-        return imu, clean
+        clean = np.expand_dims(left[0], 0)
+        imu = np.expand_dims(left[1], 0)
+
+        clean = np.ascontiguousarray(signal.filtfilt(self.b, self.a, clean)).astype(np.float32)
+        imu = np.ascontiguousarray(signal.filtfilt(self.b, self.a, imu)).astype(np.float32)
+        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean)}
     def __len__(self):
         return len(self.left_dataset)
 if __name__ == "__main__":

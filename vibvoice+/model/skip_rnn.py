@@ -82,12 +82,14 @@ class Skip_Dual_RNN_Blockclass(Dual_RNN_Block):
         '''
         confidence = self.confidence_predictor(x)
         confidence = torch.matmul(confidence.permute(0, 2, 1), self.tri).permute(0, 2, 1)
-        x *= confidence
         if self.training:
+            x *= confidence
             intra_rnn = self.intra_forward(x)
             out = self.inter_forward(intra_rnn)
         else:
+            # only apply to Batch = 1, time_frame = 1
             confidence = confidence.argmax(dim=1)
+            x = x[:, :, :confidence+1, :]
             # needs to be implemented with causal inference
             intra_rnn = self.intra_forward(x)
             out = self.inter_forward(intra_rnn)

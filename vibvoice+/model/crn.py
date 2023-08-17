@@ -30,10 +30,9 @@ class CRN(nn.Module):
                 layers.append(CausalConvBlock(channel_list[i-1], channel_list[i]))
         self.conv_blocks = nn.ModuleList(layers)
 
-        # LSTM
-        # self.lstm_layer = nn.LSTM(input_size=256*9, hidden_size=256*9, num_layers=2, batch_first=True)
-        self.lstm_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], 'GRU', bidirectional=True  )
-        # self.lstm_layer = Skip_Dual_RNN_Blockclass(256, 256, 'GRU')
+        # RNN
+        self.rnn_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], 'GRU', bidirectional=True  )
+        # self.rnn_layer = Skip_Dual_RNN_Blockclass(256, 256, 'GRU')
 
         if self.add:
             num_c = 1
@@ -54,8 +53,7 @@ class CRN(nn.Module):
                 layers.append(CausalTransConvBlock(channel_list[i]*num_c, channel_list[i-1]))
         self.trans_conv_blocks = nn.ModuleList(layers)
 
-    def forward(self, x, acc):
-
+    def causal_forward(self, x, acc, cache):
         vad = self.vad(acc)
         pad_acc = torch.nn.functional.pad(acc, (0, 0, 0, x.shape[-2] - acc.shape[-2]))
 
@@ -65,13 +63,27 @@ class CRN(nn.Module):
             d = layer(d)
             Res.append(d)
 
-        # batch_size, n_channels, n_f_bins, n_frame_size = e_5.shape
-        # # [2, 256, 4, 200] = [2, 1024, 200] => [2, 200, 1024]
-        # lstm_in = e_5.reshape(batch_size, n_channels * n_f_bins, n_frame_size).permute(0, 2, 1)
-        # lstm_out, _ = self.lstm_layer(lstm_in)  # [2, 200, 1024]
-        # lstm_out = lstm_out.permute(0, 2, 1).reshape(batch_size, n_channels, n_f_bins, n_frame_size)  # [2, 256, 4, 200]
+        d = self.rnn_layer.causal_forward(d, cache)
 
-        d = self.lstm_layer(d)
+        if self.add:
+            for layer, skip in zip(self.trans_conv_blocks, self.skip_convs):
+                d = layer(d + skip(Res.pop()))
+        else:
+            for layer in self.trans_conv_blocks:
+                d = layer(torch.cat((d, Res.pop()), 1))
+
+        return d * x, acc
+    def forward(self, x, acc):
+        vad = self.vad(acc)
+        pad_acc = torch.nn.functional.pad(acc, (0, 0, 0, x.shape[-2] - acc.shape[-2]))
+
+        Res = []
+        d = torch.cat((x, pad_acc), 1)
+        for layer in self.conv_blocks:
+            d = layer(d)
+            Res.append(d)
+
+        d = self.rnn_layer(d)
 
         if self.add:
             for layer, skip in zip(self.trans_conv_blocks, self.skip_convs):

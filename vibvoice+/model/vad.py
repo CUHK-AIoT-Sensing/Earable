@@ -35,5 +35,5 @@ class VAD(nn.Module):
         acc = acc.reshape(batch_size, n_channels * n_f_bins, n_frame_size).permute(0, 2, 1)
         acc, _ = self.rnn_layer(acc)
         vad = nn.functional.relu(self.fc1(acc))
-        vad = torch.sigmoid(self.fc2(vad))
+        vad = torch.sigmoid(self.fc2(vad)).reshape(-1, 1)
         return vad
