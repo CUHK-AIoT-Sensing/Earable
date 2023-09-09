@@ -1,11 +1,12 @@
-/pretrained_models/
-vibvoice/transfer_function/
-vibvoice/vis/
-vibvoice/json/
-vibvoice/plot/
 ABCS/
 EMSB/
-VIBVOICE/
+DEMAND/
+other/
+data_aishell/
+ASR/
+V2S/
+V2S_tmp/
+pretrained_models/
 *.wav
 *.pth
 *.ckpt
@@ -14,3 +15,5 @@ VIBVOICE/
 *.json
 *.png
 *.pyc
+*.flac
+*.txt

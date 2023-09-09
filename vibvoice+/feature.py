@@ -5,9 +5,10 @@ import librosa
 import numpy as np
 import torch
 import torch.nn as nn
-
+'''
+inherit functions from FullSubNet
+'''
 EPSILON = np.finfo(np.float32).eps
-
 def stft(y, n_fft, hop_length, win_length):
     """
     Wrapper of the official torch.stft for single-channel and multi-channel
@@ -32,7 +33,6 @@ def stft(y, n_fft, hop_length, win_length):
 
     if num_dims == 3:
         y = y.reshape(-1, num_samples)
-
     complex_stft = torch.stft(y, n_fft, hop_length, win_length, window=torch.hann_window(win_length, device=y.device),
                               return_complex=True)
     _, num_freqs, num_frames = complex_stft.shape
@@ -43,7 +43,6 @@ def stft(y, n_fft, hop_length, win_length):
     mag, phase = torch.abs(complex_stft), torch.angle(complex_stft)
     real, imag = complex_stft.real, complex_stft.imag
     return mag, phase, real, imag
-
 
 def istft(features, n_fft, hop_length, win_length, length=None, input_type="complex"):
     """
@@ -74,7 +73,6 @@ def istft(features, n_fft, hop_length, win_length, length=None, input_type="comp
         features = torch.complex(mag * torch.cos(phase), mag * torch.sin(phase))
     else:
         raise NotImplementedError("Only 'real_imag', 'complex', and 'mag_phase' are supported")
-
     return torch.istft(features, n_fft, hop_length, win_length, window=torch.hann_window(win_length, device=features.device),
                        length=length)
 
