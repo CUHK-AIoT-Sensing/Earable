@@ -1,173 +1,103 @@
 import torch
-import numpy as np
-from evaluation import batch_pesq, SI_SDR, batch_stoi
+from evaluation import eval
 from feature import stft, istft
-from skimage import filters
-import time
-def eval(clean, predict):
-    metric1 = batch_pesq(clean, predict, 'wb')
-    metric2 = batch_pesq(clean, predict, 'nb')
-    metric3 = SI_SDR(clean, predict)
-    metric4 = batch_stoi(clean, predict)
-    metrics = [metric1, metric2, metric3, metric4]
-    return np.stack(metrics, axis=1)
-
-def MixIT_loss(yhat, mix_stft, noise_stft, noisy_stft):
-    
-    """
-    The loss for mixture invariant training (MixIT). 
-    
-    Args:
-        yhat: The output of the convolutional neural network before the non-linear activation function. There are three output
-            channels corresponding to an enhanced speech and two noise estimates.
-        mix_stft: The mixture of a noisy signal example and a noise example in the short-time Fourier transform domain.
-        noise_stft: The noise example in the short-time Fourier transform domain.
-        noisy_stft: The noisy speech example in the short-time Fourier transform domain.
-        
-    Returns:
-        The loss.
-    """
-
-    # loss1 = Spectral_Loss(torch.sigmoid(yhat[:,0,:,:]) + torch.sigmoid(yhat[:,1,:,:]) * mix_stft, noisy_stft)
-    # loss1 += Spectral_Loss(torch.sigmoid(yhat[:,2,:,:])  * mix_stft, noise_stft)
-    # loss2 = Spectral_Loss(torch.sigmoid(yhat[:,0,:,:]) + torch.sigmoid(yhat[:,2,:,:]) * mix_stft, noisy_stft)
-    # loss2 += Spectral_Loss(torch.sigmoid(yhat[:,1,:,:])  * mix_stft, noise_stft)
-
-    loss1 = torch.mean(((torch.sigmoid(yhat[:,0,:,:]) + torch.sigmoid(yhat[:,1,:,:])) * torch.abs(mix_stft) - torch.abs(noisy_stft)) ** 2)
-    loss1 += torch.mean((torch.sigmoid(yhat[:,2,:,:])  * torch.abs(mix_stft) - torch.abs(noise_stft)) ** 2)
-    loss2 = torch.mean(((torch.sigmoid(yhat[:,0,:,:]) + torch.sigmoid(yhat[:,2,:,:])) * torch.abs(mix_stft) - torch.abs(noisy_stft)) ** 2)
-    loss2 += torch.mean((torch.sigmoid(yhat[:,1,:,:])  * torch.abs(mix_stft) - torch.abs(noise_stft)) ** 2)
-    
-    return torch.minimum(loss1, loss2)
-
-def sigmoid_loss(z):
-    
-    """
-    The sigmoid loss for binary classification based on empirical risk minimization. See R. Kiryo, G. Niu, 
-    M. C. du Plessis, and M. Sugiyama, “Positive-unlabeled learning with non-negative risk estimator,” in 
-    Proc. NIPS, CA, USA, Dec. 2017.
-    
-    Args:
-        z: The margin.
-    
-    Returns:
-        The loss value.
-    """
-
-    return torch.sigmoid(-z)
-
-def weighted_pu_loss(y, yhat, mix_stft, beta, gamma = 1.0, prior = 0.5, ell = sigmoid_loss, p = 1, mode = 'nn'):
-    
-    """
-    The weighted loss for learning from positive and unlabelled data (PU learning). See N. Ito and M. Sugiyama, 
-    "Audio signal enhancement with learning from positive and unlabelled data," arXiv, 
-    https://arxiv.org/abs/2210.15143. 
-    
-    Args:
-        y: A mask indicating whether each time-frequency component is positive (1) or unlabelled (0).
-        yhat: The output of the convolutional neural network before the non-linear activation function.
-        mix_stft: The noisy speech in the short-time Fourier transform domain.
-        beta: The beta parameter in PU learning using non-negative empirical risk.
-        gamma: The gamma parameter in PU learning using non-negative empirical risk.
-        prior: The class prior for the positive class.
-        ell: The loss function for each time-frequency component such as the sigmoid loss.
-        p: The exponent for the weight. p = 1.0 corresponds to weighting by the magnitude spectrogram of the 
-            input noisy speech. p = 0.0 corresponds to no weighting.
-        mode: The type of the empirical risk in PU learning. 'nn' corresponds to the non-negative empirical 
-            risk. 'unbiased' corresponds to the unbiased empirical risk.
-        
-    Returns:
-        The weighted loss.
-    """
-    
-    # Note for future updates: Divide this into two functions, like weighted_sigmoid_loss and TF_level_loss?
-    
-    epsilon = 10 ** -7
-    weight = (torch.abs(mix_stft) + epsilon) ** p
-    pos = prior * torch.sum(y * ell(yhat) * weight) / (torch.sum(y) + epsilon)
-    neg = torch.sum((1. - y) * ell(-yhat) * weight) / (torch.sum(1. - y) + epsilon) - prior * torch.sum(y * ell(-yhat) * weight) / (torch.sum(y) + epsilon)
-
-    if mode == 'unbiased':
-        loss = pos + neg
-    elif mode == 'nn':
-        if neg > beta:
-            loss = pos + neg
-        else:
-            loss = gamma * (beta - neg)
-    return loss
-def get_mask(acc, vad):
-    '''
-    1. 
-    noise -> inactivity -> mask = 1 (determined by ~vad)
-    the others (unlabelled) -> mask = 2
-    2. 
-    acc -> activity -> mask of 1
-    others (include nothing, noise, speech) -> inactivity -> all 0
-    '''
-    mask = torch.zeros_like(acc)
-    mask = torch.masked_fill(mask, ~vad.bool(), 1)
-    ratio = 1 - torch.mean(vad)
-    # threshold = filters.threshold_otsu(acc.numpy())
-    # mask = (acc > threshold).to(dtype=torch.float32)
-    return mask, ratio
-def Spectral_Loss(x_mag, y_mag, vad=1):
-    """Calculate forward propagation.
-          Args:
-              x_mag (Tensor): Magnitude spectrogram of predicted signal (B, #frames, #freq_bins).
-              y_mag (Tensor): Magnitude spectrogram of groundtruth signal (B, #frames, #freq_bins).
-              vad (Tensor): VAD of groundtruth signal (B, #frames, #freq_bins).
-          Returns:
-              Tensor: Spectral convergence loss value.
-          """
-    x_mag = torch.clamp(x_mag, min=1e-7)
-    y_mag = torch.clamp(y_mag, min=1e-7)
-    spectral_convergenge_loss =  torch.norm(vad * (y_mag - x_mag), p="fro") / torch.norm(y_mag, p="fro")
-    log_stft_magnitude = (vad * (torch.log(y_mag) - torch.log(x_mag))).abs().mean()
-    return 0.5 * spectral_convergenge_loss + 0.5 * log_stft_magnitude
-
-def train_DPCRN(model, sample, optimizer, device='cuda'):
-    acc = sample['imu']; noisy = sample['noisy']; clean = sample['clean']; vad = sample['vad']
-    noisy_mag, _, _, _ = stft(noisy, 640, 320, 640)
+from loss import Spectral_Loss
+from model import batch_pesq
+def decode(model, noisy_mag, noisy_phase, noisy_real, noisy_imag, acc, method='magnitude'):
+    if method == 'magnitude':
+        predict_mask = model(noisy_mag, acc)
+        est_mag = predict_mask * noisy_mag
+        est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase")
+    elif method == 'real_imag':
+        noisy_input = torch.cat([noisy_real, noisy_imag], dim=1)
+        predict_mask = model(noisy_input, acc)
+        predict = predict_mask * noisy_input
+        est_mag = torch.abs(torch.complex(predict[:, :1], predict[:, 1:]))
+        est_audio = istft((predict[:, 0], predict[:, 1]), 640, 320, 640, input_type="real_imag")
+    else: # mag_real_imag
+        noisy_input = torch.cat([noisy_mag, noisy_real, noisy_imag], dim=1)
+        predict = model(noisy_input, acc)
+        est_real = torch.sigmoid(predict[:, :1]) * noisy_real
+        est_imag = torch.sigmoid(predict[:, :1]) * noisy_imag
+        phase_square = (predict[:, 1:2]**2 + predict[:, 2:]**2) ** 0.5
+        phase_sin = predict[:, 1:2] / phase_square; phase_cos = predict[:, 1:2]/ phase_square
+        est_real = est_real * phase_cos - est_imag * phase_sin
+        est_imag = est_real * phase_sin + est_imag * phase_cos
+        est_mag = torch.abs(torch.complex(est_real, est_imag))
+        est_audio = istft((est_real.squeeze(1), est_imag.squeeze(1)), 640, 320, 640, input_type="real_imag")
+    return est_mag, est_audio
+def train_DPCRN(model, sample, optimizer, device='cuda', discriminator=None, optimizer_disc=None):
+    acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device); vad = sample['vad']
+    noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
     clean_mag, _, _, _ = stft(clean, 640, 320, 640)
     optimizer.zero_grad()
     acc, _, _, _ = stft(acc, 640, 320, 640)
-    predict_mask = model(noisy_mag.to(device), acc.to(device))
-    loss = Spectral_Loss(predict_mask * noisy_mag.to(device), clean_mag.to(device))
-    loss.backward()
+
+    est_mag, est_audio = decode(model, noisy_mag, noisy_phase, noisy_real, noisy_imag, acc, method='magnitude')
+    loss = Spectral_Loss(est_mag, clean_mag)
+    loss += 0.2 * torch.mean(torch.abs(est_audio - clean)) 
+
+    if discriminator is not None:
+        predict_fake_metric = discriminator(clean_mag, est_mag)
+        loss += 0.05 * torch.nn.functional.mse_loss(predict_fake_metric.flatten(),
+                                                torch.ones(noisy.shape[0]).to(device).float())
+    loss.backward() 
     optimizer.step()
+    if discriminator is not None:
+        discrim_loss_metric = calculate_discriminator_loss(discriminator=discriminator, clean_mag=clean_mag, clean_audio=clean, est_mag = est_mag, est_audio=est_audio)
+        if discrim_loss_metric is not None:
+            optimizer_disc.zero_grad()
+            discrim_loss_metric.backward()
+            optimizer_disc.step()
+        else:
+            discrim_loss_metric = torch.tensor([0.0])
     return loss.item()
 def test_DPCRN(model, sample, device='cuda'):
-    acc = sample['imu']; noisy = sample['noisy']; clean = sample['clean']; vad = sample['vad']
-    noisy_mag, noisy_phase, _, _ = stft(noisy, 640, 320, 640)
+    acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device); vad = sample['vad']
+    noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
     acc, _, _, _ = stft(acc, 640, 320, 640)
-    predict_mask = model(noisy_mag.to(device), acc.to(device))
-    predict = (predict_mask.cpu() * noisy_mag).cpu()
-    predict = istft((predict.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase").numpy()
-    clean = clean.numpy().squeeze(1)
-    return clean, predict
+    est_mag, est_audio = decode(model, noisy_mag, noisy_phase, noisy_real, noisy_imag, acc, method='magnitude')
+    est_audio = est_audio.cpu().numpy()
+    clean = clean.cpu().numpy().squeeze(1)
+    return clean, est_audio
 
-def train_SUB_DPCRN(model, sample, optimizer, device='cuda'):
-    acc = sample['imu']; noisy = sample['noisy']; clean = sample['clean']; vad = sample['vad']
-    noisy_mag, _, _, _ = stft(noisy, 640, 320, 640)
+def train_SUPER(model, sample, optimizer, device='cuda', discriminator=None, optimizer_disc=None):
+    acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device); vad = sample['vad']
+    noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
     clean_mag, _, _, _ = stft(clean, 640, 320, 640)
     optimizer.zero_grad()
     acc, _, _, _ = stft(acc, 640, 320, 640)
-    acc = torch.norm(acc, dim=1, p=2, keepdim=True)
-    predict_mask = model(noisy_mag.to(device), acc.to(device))
-    loss = Spectral_Loss(predict_mask * noisy_mag.to(device), clean_mag.to(device))
-    loss.backward()
+    est_mag, est_audio = decode(model, noisy_mag, noisy_phase, noisy_real, noisy_imag, acc, method='magnitude')
+    loss = Spectral_Loss(est_mag, clean_mag)
+    loss += 0.2 * torch.mean(torch.abs(est_audio - clean)) 
+    loss.backward() 
     optimizer.step()
     return loss.item()
-def test_SUB_DPCRN(model, sample, device='cuda'):
-    acc = sample['imu']; noisy = sample['noisy']; clean = sample['clean']; vad = sample['vad']
-    noisy_mag, noisy_phase, _, _ = stft(noisy, 640, 320, 640)
+def test_SUPER(model, sample, device='cuda'):
+    acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device); vad = sample['vad']
+    noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
     acc, _, _, _ = stft(acc, 640, 320, 640)
-    acc = torch.norm(acc, dim=1, p=2, keepdim=True)
-    predict_mask = model(noisy_mag.to(device), acc.to(device))
-    predict = (predict_mask.cpu() * noisy_mag)
-    predict = istft((predict.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase").numpy()
-    clean = clean.numpy().squeeze(1)
-    return clean, predict
+    est_mag, est_audio = decode(model, noisy_mag, noisy_phase, noisy_real, noisy_imag, acc, method='magnitude')
+    est_audio = est_audio.cpu().numpy()
+    clean = clean.cpu().numpy().squeeze(1)
+    return clean, est_audio
+
+def calculate_discriminator_loss(discriminator, clean_mag, clean_audio, est_mag, est_audio, ):
+    pesq_score = batch_pesq(clean_audio.squeeze(1).cpu().numpy(), est_audio.detach().cpu().numpy())
+    # The calculation of PESQ can be None due to silent part
+    if pesq_score is not None:
+        predict_enhance_metric = discriminator(
+            clean_mag, est_mag.detach()
+        )
+        predict_max_metric = discriminator(
+           clean_mag, clean_mag
+        )
+        discrim_loss_metric = torch.nn.functional.mse_loss(
+            predict_max_metric.flatten(),  torch.ones(est_mag.shape[0]).to(est_mag.device))
+        + torch.nn.functional.mse_loss(predict_enhance_metric.flatten(), pesq_score)
+    else:
+        discrim_loss_metric = None
+    return discrim_loss_metric
 
 def train_PULSE(model, sample, optimizer, device='cuda'):
     optimizer.zero_grad()

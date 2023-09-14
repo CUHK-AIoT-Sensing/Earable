@@ -4,8 +4,6 @@ import numpy as np
 import scipy.signal as signal
 import torchaudio
 import torch
-
-
 def tailor_dB_FS(y, target_dB_FS=-25, eps=1e-6):
     rms = (y ** 2).mean() ** 0.5
     scaler = 10 ** (target_dB_FS / 20) / (rms + eps)
@@ -54,8 +52,7 @@ def snr_mix(noise_y, clean_y, snr, target_dB_FS, rir=None, eps=1e-6):
             noisy_y_scalar = (noisy_y).abs().max() / (0.99 - eps)  # 相当于除以 1
             noisy_y = noisy_y / noisy_y_scalar
             clean_y = clean_y / noisy_y_scalar
-        return noisy_y, clean_y, noise_y
-
+        return noisy_y, clean_y, noise_y, noisy_scalar
 class BaseDataset:
     def __init__(self, files=None, pad=True, sample_rate=16000, length=5, stride=3):
         """
@@ -113,7 +110,7 @@ class VoiceBankDataset:
                 data = json.load(f)
             self.rir = data
             self.rir_length = len(self.rir)
-        self.b, self.a = signal.butter(4, 80, 'highpass', fs=16000)
+        self.b, self.a = signal.butter(4, 100, 'highpass', fs=16000)
         self.b = torch.from_numpy(self.b, ).to(dtype=torch.float)
         self.a = torch.from_numpy(self.a, ).to(dtype=torch.float)
         self.mode = mode
@@ -139,21 +136,21 @@ class VoiceBankDataset:
         return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'mixture': mixture, 'noise': noise, 'file': file} 
      def PN(self, clean, imu, noise, snr, rir, file):
         target_dB_FS = np.random.randint(-35, -15)
-        noisy, clean, noise = snr_mix(noise, clean, snr, target_dB_FS, rir, eps=1e-6)
-        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file}  
+        noisy, clean, noise, scaler = snr_mix(noise, clean, snr, target_dB_FS, rir, eps=1e-6)
+        imu *= scaler
+        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise}  
      def PU(self, mask, clean, imu, noise, snr, rir, file):
         target_dB_FS = np.random.randint(-35, -15)
         if mask == 1:
-            noise, _, _ = tailor_dB_FS(noise, target_dB_FS)
+            noise, _, scaler = tailor_dB_FS(noise, target_dB_FS)
             noisy = noise
             clean = noise
+            imu *= scaler
         else:
-            noisy, clean, noise = snr_mix(noise, clean, snr, target_dB_FS, rir, eps=1e-6)
+            noisy, clean, noise, scaler = snr_mix(noise, clean, snr, target_dB_FS, rir, eps=1e-6)
+            imu *= scaler
         return {'mask': mask, 'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file} 
      def WILD(self, clean, imu, noise, snr, rir, file):
-        target_dB_FS = np.random.randint(-35, -15)
-        clean, _, scaler = tailor_dB_FS(clean, target_dB_FS)
-        imu = imu * scaler
         return {'imu': imu, 'clean': clean, 'vad': vad_annotation(imu), 'noisy': clean, 'file': file}  
      def __getitem__(self, index):
         if self.mode == 'PU':
@@ -161,16 +158,21 @@ class VoiceBankDataset:
         else:
             left, file = self.left_dataset[index]
         clean = left[:1, :]
-        imu = clean
+        imu = torch.zeros_like(clean)
         noise, _ = self.noise_dataset.__getitem__(np.random.randint(0, self.noise_length))
+
+        if noise.shape[-1] <= clean.shape[-1]:
+            noise = torch.nn.functional.pad(noise, (0, clean.shape[-1] - noise.shape[-1], 0, 0), 'constant')
+        else:
+            offset = np.random.randint(0, noise.shape[-1] - clean.shape[-1])
+            noise = noise[:, offset:offset+clean.shape[-1]]
+
         use_reverb = False if self.rir is None else bool(np.random.random(1) < 0.75)
         rir = torchaudio.load(self.rir[np.random.randint(0, self.rir_length)][0])[0] if use_reverb else None
         snr = np.random.choice(self.snr_list)
         
-        clean = clean - torch.mean(clean)
-        # clean = torchaudio.functional.filtfilt(clean, self.a, self.b,)
-        # imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
-        # noise = torchaudio.functional.filtfilt(noise, self.a, self.b,)
+        clean = torchaudio.functional.filtfilt(clean, self.a, self.b,)
+        imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
         if self.mode == 'PN':
             return self.PN(clean, imu, noise, snr, rir, file)
         elif self.mode == 'PU':
@@ -182,9 +184,8 @@ class VoiceBankDataset:
             return 2 * len(self.left_dataset)
         else:
             return len(self.left_dataset)
-
 class ABCSDataset(VoiceBankDataset):
-    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode = 'PN'):
+    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode='PN', length=5):
         self.snr_list = np.arange(snr[0], snr[1], 1)
         sr = 16000
         with open(data, 'r') as f:
@@ -192,10 +193,11 @@ class ABCSDataset(VoiceBankDataset):
             left = []
             for speaker in data.keys():
                 left += data[speaker]
-            self.left_dataset = BaseDataset(left, sample_rate=sr)
+            self.left_dataset = BaseDataset(left, sample_rate=sr, length=length)
         self.noise = noise
         if self.noise is not None:
             self.noise_dataset = BaseDataset(noise, sample_rate=sr)
+            # self.noise_dataset = NoiseDataset(noise, sample_rate=sr)
             self.noise_length = len(self.noise_dataset)
         self.rir = rir
         if self.rir is not None:
@@ -216,44 +218,32 @@ class ABCSDataset(VoiceBankDataset):
         clean = left[:1, :]
         imu = left[1:, :]
         noise, _ = self.noise_dataset.__getitem__(np.random.randint(0, self.noise_length))
+
+        if noise.shape[-1] <= clean.shape[-1]:
+            noise = torch.nn.functional.pad(noise, (0, clean.shape[-1] - noise.shape[-1], 0, 0), 'constant')
+        else:
+            offset = np.random.randint(0, noise.shape[-1] - clean.shape[-1])
+            noise = noise[:, offset:offset+clean.shape[-1]]
+
         use_reverb = False if self.rir is None else bool(np.random.random(1) < 0.75)
         rir = torchaudio.load(self.rir[np.random.randint(0, self.rir_length)][0])[0] if use_reverb else None
         snr = np.random.choice(self.snr_list)
         
         clean = torchaudio.functional.filtfilt(clean, self.a, self.b,)
         imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
-
         if self.mode == 'PN':
             return self.PN(clean, imu, noise, snr, rir, file)
         elif self.mode == 'PU':
             return self.PU(index % 2, clean, imu, noise, snr, rir, file)
         else:
             return self.MIXIT(clean, imu, noise, snr, rir, file)
-
 class V2SDataset(VoiceBankDataset):
-    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode = 'PN', speakers=None):
+    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode = 'PN'):
         self.snr_list = np.arange(snr[0], snr[1], 1)
-        sr = 16000
-        with open(data, 'r') as f:
-            data = json.load(f)
-            left = []
-            if speakers is not None:
-                for speaker in speakers:
-                    left += data[speaker]
-            else:
-                for speaker in data.keys():
-                    left += data[speaker]
-            self.left_dataset = BaseDataset(left, sample_rate=sr, length=None)
-        self.noise = noise
-        if self.noise is not None:
-            self.noise_dataset = BaseDataset(noise, sample_rate=sr)
-            self.noise_length = len(self.noise_dataset)
         self.rir = rir
-        if self.rir is not None:
-            with open(rir, 'r') as f:
-                data = json.load(f)
-            self.rir = data
-            self.rir_length = len(self.rir)
+        self.noise = noise
+        sr = 16000
+        self.left_dataset = BaseDataset(data, sample_rate=sr, length=None)
         self.b, self.a = signal.butter(4, 100, 'highpass', fs=16000)
         self.b = torch.from_numpy(self.b, ).to(dtype=torch.float)
         self.a = torch.from_numpy(self.a, ).to(dtype=torch.float)
@@ -264,10 +254,7 @@ class V2SDataset(VoiceBankDataset):
         clean = left[1:, :]
         imu = left[:1, :]
 
-        if self.noise == None:
-            noise = torch.zeros_like(clean)
-        else:
-            noise = self.noise_dataset.__getitem__(np.random.randint(0, self.noise_length))
+        noise = torch.zeros_like(clean)
         use_reverb = False if self.rir is None else bool(np.random.random(1) < 0.75)
         rir = torchaudio.load(self.rir[np.random.randint(0, self.rir_length)][0])[0] if use_reverb else None
         snr = np.random.choice(self.snr_list)
@@ -275,14 +262,9 @@ class V2SDataset(VoiceBankDataset):
         clean = torchaudio.functional.filtfilt(clean, self.a, self.b,)
         imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
 
-        if self.mode == 'PN':
-            return self.PN(clean, imu, noise, snr, rir, file)
-        elif self.mode == 'PU':
-            return self.PU(index % 2, clean, imu, noise, snr, rir, file)
-        elif self.mode == 'WILD':
-            return self.WILD(clean, imu, noise, snr, rir, file)
-        else:
-            return self.MIXIT(clean, imu, noise, snr, rir, file)
+        imu *= 3 # magic number to compensate two modality
+        clean *= 4; imu *= 4 # This is a magic number to move the dBFS from 38 to 26
+        return self.WILD(clean, imu, noise, snr, rir, file)
 class EMSBDataset(VoiceBankDataset):
     def __init__(self, emsb, noise=None, mono=False, ratio=1, snr=(-5, 15), rir=None):
         self.dataset = []

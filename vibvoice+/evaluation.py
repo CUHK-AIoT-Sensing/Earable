@@ -4,47 +4,13 @@ import torch
 from pesq import pesq, pesq_batch
 from joblib import Parallel, delayed
 from pystoi.stoi import stoi
-
-sentences = [["HAPPY", "NEW", "YEAR", "PROFESSOR", "AUSTIN", "NICE", "TO", "MEET", "YOU"],
-                    ["WE", "WANT", "TO", "IMPROVE", "SPEECH", "QUALITY", "IN", "THIS", "PROJECT"],
-                    ["BUT", "WE", "DON'T", "HAVE", "ENOUGH", "DATA", "TO", "TRAIN", "OUR", "MODEL"],
-                    ["TRANSFER", "FUNCTION", "CAN", "BE", "A", "GOOD", "HELPER", "TO", "GENERATE", "DATA"]]
-def editDistance(r, h):
-    '''
-    This function is to calculate the edit distance of reference sentence and the hypothesis sentence.
-
-    Main algorithm used is dynamic programming.
-
-    Attributes:
-        r -> the list of words produced by splitting reference sentence.
-        h -> the list of words produced by splitting hypothesis sentence.
-    '''
-    d = np.zeros((len(r) + 1) * (len(h) + 1), dtype=np.uint8).reshape((len(r) + 1, len(h) + 1))
-    for i in range(len(r) + 1):
-        d[i][0] = i
-    for j in range(len(h) + 1):
-        d[0][j] = j
-    for i in range(1, len(r) + 1):
-        for j in range(1, len(h) + 1):
-            if r[i - 1] == h[j - 1]:
-                d[i][j] = d[i - 1][j - 1]
-            else:
-                substitute = d[i - 1][j - 1] + 1
-                insert = d[i][j - 1] + 1
-                delete = d[i - 1][j] + 1
-                d[i][j] = min(substitute, insert, delete)
-    return float(d[len(r)][len(h)])
-
-def wer(r, h):
-    """
-    This is a function that calculate the word error rate in ASR.
-    You can use it like this: wer("what is it".split(), "what is".split())
-    """
-    # build the matrix
-    d = editDistance(r, h)
-    # print the result in aligned way
-    result = d / len(r) * 100
-    return result
+def eval(clean, predict):
+    metric1 = batch_pesq(clean, predict, 'wb')
+    metric2 = batch_pesq(clean, predict, 'nb')
+    metric3 = SI_SDR(clean, predict)
+    metric4 = batch_stoi(clean, predict)
+    metrics = [metric1, metric2, metric3, metric4]
+    return np.stack(metrics, axis=1)
 
 def SI_SDR(reference, estimation, sr=16000):
     """

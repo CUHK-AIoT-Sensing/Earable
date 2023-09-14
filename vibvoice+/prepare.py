@@ -14,7 +14,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', '-d', action="store", type=str, default='EMSB', required=False)
     args = parser.parse_args()
-    print('start processing')
     if args.dataset == 'EMSB':
         sample_rate = 16000
         dict = {}
@@ -70,13 +69,16 @@ if __name__ == "__main__":
         timer = 0
         for speaker in speakers:
             path = directory + '/' + speaker
-            data[speaker] = []
+            data[speaker] = {}
             for date in os.listdir(path):
                 date_path = path + '/' + date
-                for f in os.listdir(date_path):
+                files = os.listdir(date_path)
+                files.sort()
+                data[speaker][date] = []
+                for f in files:
                     try:
                         headset = [os.path.join(date_path, f), torchaudio.info(os.path.join(date_path, f)).num_frames]
-                        data[speaker].append(headset)
+                        data[speaker][date].append(headset)
                         timer += headset[1]/16000
                     except:
                         pass
@@ -84,7 +86,7 @@ if __name__ == "__main__":
         json.dump(data, open('json/' + args.dataset + '.json', 'w'), indent=4)
     elif args.dataset == 'other':
         sample_rate = 16000
-        splits = ['background', 'librispeech-dev', 'rir', 'DEMAND', 'aishell-dev']
+        splits = ['background', 'rir', 'DEMAND']
         for split in splits:
             data = []
             directory = '../' + args.dataset + '/' + split

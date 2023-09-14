@@ -29,11 +29,17 @@ def train(dataset, EPOCH, lr, BATCH_SIZE, model,):
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset, num_workers=16, batch_size=BATCH_SIZE, shuffle=True,
                                                drop_last=True, pin_memory=False)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.2)
-    loss_best = 1000
-    ckpt_best = model.state_dict()
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.2)
     save_dir = 'checkpoints/' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '/'
     os.mkdir(save_dir)
+    if args.adversarial:
+        discriminator = Discriminator().to(device)
+        optimizer_disc = torch.optim.AdamW(discriminator.parameters(), lr=2 * lr)
+    else:
+        discriminator = None
+        optimizer_disc = None
+    loss_best = 1000
+    ckpt_best = model.state_dict()
     if checkpoint is not None:
         print('first test the initial checkpoint')
         avg_metric = inference(test_dataset, BATCH_SIZE, model)
@@ -42,18 +48,19 @@ def train(dataset, EPOCH, lr, BATCH_SIZE, model,):
         model.train()
         with tqdm(total=len(train_loader)) as t:
             for i, sample in enumerate(train_loader):
-                loss = getattr(helper, 'train_' + model_name)(model, sample, optimizer, device)
+                loss = getattr(helper, 'train_' + model_name)(model, sample, optimizer, device, discriminator, optimizer_disc)
                 Loss_list.append(loss)
                 t.set_description('Epoch %i' % e)
                 t.set_postfix(loss=np.mean(Loss_list))
                 t.update(1)
         mean_lost = np.mean(Loss_list)
-        scheduler.step()
+        # scheduler.step()
         avg_metric = inference(test_dataset, BATCH_SIZE, model)
         if mean_lost < loss_best:
             ckpt_best = model.state_dict()
             loss_best = mean_lost
             metric_best = avg_metric
+            # only make directory and save if there is improvement
             torch.save(ckpt_best, save_dir + args.model + '_' + args.dataset + '_' + str(e) + '_' + str(metric_best) + '.pth')
     torch.save(ckpt_best, save_dir + 'best.pth')
     print('best performance is', metric_best)
@@ -62,6 +69,7 @@ def train(dataset, EPOCH, lr, BATCH_SIZE, model,):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', action="store_true", default=False, required=False)
+    parser.add_argument('--adversarial', action="store_true", default=False, required=False)
     parser.add_argument('--model', action="store", type=str, default='DPCRN', required=False, help='choose the model')
     parser.add_argument('--dataset', '-d', action="store", type=str, default='ABCS', required=False, help='choose the mode')
 
@@ -73,13 +81,14 @@ if __name__ == "__main__":
     # model = torch.nn.DataParallel(model)
     rir = 'json/rir.json'
     BATCH_SIZE = 64
-    lr = 0.00001
+    lr = 0.00002
     EPOCH = 20
     checkpoint = None
-    # checkpoint = 'model_MixIT.pth'
     # checkpoint = '20230903-145505/best.pth'
+    # checkpoint = '20230913-092655-default/best.pth'
+    # checkpoint = '20230914-072918/best.pth'
     noises = [
-              'json/other_background.json', 
+              #'json/other_background.json', 
               # 'json/ASR_dev-clean.json',
               'json/ASR_aishell-dev.json',
               'json/other_DEMAND.json',
