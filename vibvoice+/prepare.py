@@ -86,7 +86,7 @@ if __name__ == "__main__":
         json.dump(data, open('json/' + args.dataset + '.json', 'w'), indent=4)
     elif args.dataset == 'other':
         sample_rate = 16000
-        splits = ['background', 'rir', 'DEMAND']
+        splits = ['background', 'rir', 'DEMAND', 'freesound']
         for split in splits:
             data = []
             directory = '../' + args.dataset + '/' + split

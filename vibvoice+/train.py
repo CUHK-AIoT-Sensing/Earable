@@ -8,7 +8,6 @@ import helper
 import json
 import os
 import datetime
-
 def inference(dataset, BATCH_SIZE, model):
     test_loader = torch.utils.data.DataLoader(dataset=dataset, num_workers=8, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
     Metric = []
@@ -17,8 +16,6 @@ def inference(dataset, BATCH_SIZE, model):
         for i, sample in enumerate(tqdm(test_loader)):
             clean, predict = getattr(helper, 'test_' + model_name)(model, sample, device)
             metric = helper.eval(clean, predict)
-            if hasattr(model, 'comp_ratio'):
-                metric = np.concatenate([metric, model.comp_ratio], axis=-1)
             Metric.append(metric)
     avg_metric = np.round(np.mean(np.concatenate(Metric, axis=0), axis=0),2).tolist()
     print(avg_metric)
@@ -29,7 +26,6 @@ def train(dataset, EPOCH, lr, BATCH_SIZE, model,):
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset, num_workers=16, batch_size=BATCH_SIZE, shuffle=True,
                                                drop_last=True, pin_memory=False)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.2)
     save_dir = 'checkpoints/' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '/'
     os.mkdir(save_dir)
     if args.adversarial:
@@ -80,29 +76,26 @@ if __name__ == "__main__":
     model = globals()[model_name]().to(device)
     # model = torch.nn.DataParallel(model)
     rir = 'json/rir.json'
-    BATCH_SIZE = 64
-    lr = 0.00002
+    BATCH_SIZE = 32
+    lr = 0.00001
     EPOCH = 20
     checkpoint = None
     # checkpoint = '20230903-145505/best.pth'
     # checkpoint = '20230913-092655-default/best.pth'
     # checkpoint = '20230914-072918/best.pth'
+    # checkpoint = '20230915-112539/best.pth'
+    # checkpoint = '20230916-135656/best.pth'
+    # checkpoint = '20230918-132144/best.pth'
     noises = [
-              #'json/other_background.json', 
-              # 'json/ASR_dev-clean.json',
               'json/ASR_aishell-dev.json',
               'json/other_DEMAND.json',
+              'json/other_freesound.json'
               ]
     noise_file = []
     for noise in noises:
         noise_file += json.load(open(noise, 'r'))
 
-    if args.model == 'PULSE':
-        mode = 'PU'
-    elif args.model == 'MIXIT':
-        mode = 'MIXIT'
-    else: 
-        mode = 'PN'
+    mode = 'PN'
         
     if args.dataset == 'EMSB':
         dataset = [EMSBDataset('json/EMSB.json', noise=noise_file, ratio=0.8, mono=True, mode=mode), EMSBDataset('json/EMSB.json', noise=noise_file, ratio=-0.2, mono=True)]

@@ -7,6 +7,7 @@ ASR/
 V2S/
 V2S_tmp/
 pretrained_models/
+*.jpg
 *.bz2
 *.th
 *.wav

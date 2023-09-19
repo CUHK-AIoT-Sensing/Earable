@@ -11,19 +11,32 @@ import argparse
 import helper
 import scipy.stats as stats
 import json
-
+import matplotlib.pyplot as plt
+import numpy as np
 
 def inference(dataset, BATCH_SIZE, model):
     test_loader = torch.utils.data.DataLoader(dataset=dataset, num_workers=1, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
     model.eval()
     with torch.no_grad():
         for i, sample in enumerate(tqdm(test_loader)):
-            _, predict = getattr(helper, 'test_' + model_name)(model, sample, device)
-            for j in range(BATCH_SIZE):
-                fname = sample['file'][j]
-                fname = fname.replace(dir, output_dir)
-                wavfile.write(fname, 16000, predict[j])
+            clean, predict = getattr(helper, 'test_' + model_name)(model, sample, device)
+            if len(clean.shape) == 3:
+                for j in range(BATCH_SIZE):
+                    fname = sample['file'][j]
+                    fname = fname.replace(dir, output_dir)[:-4]
+                    np.save(fname.replace('Audio', 'Mel') + '.npy', predict[j])
+                    if i % 100 == 0:
+                        plt.subplot(1, 2, 1)
+                        plt.imshow(clean[j])
+                        plt.subplot(1, 2, 2)
+                        plt.imshow(predict[j])
+                        plt.savefig(fname.replace('Audio', 'Figure')+ '.jpg')
 
+            else:
+                for j in range(BATCH_SIZE):
+                        fname = sample['file'][j]
+                        fname = fname.replace(dir, output_dir)
+                        wavfile.write(fname, 16000, predict[j])
 def selection_score(sample):
     '''
     1. correlation
@@ -64,7 +77,7 @@ if __name__ == "__main__":
   
     if args.dataset == 'ABCS':
         noises = [
-              'json/other_background.json', 'json/ASR_aishell-dev.json', 'json/other_DEMAND.json',
+              'json/ASR_aishell-dev.json', 'json/other_DEMAND.json',
               ]
         noise_file = []
         for noise in noises:
@@ -85,7 +98,10 @@ if __name__ == "__main__":
     # checkpoint = '20230903-145505/best.pth'
     # checkpoint = '20230913-092655/best.pth'
     # checkpoint  = '20230914-072918/best.pth'
-    checkpoint = '20230914-103229/best.pth'
+    # checkpoint = '20230914-103229/best.pth'
+    # checkpoint = '20230915-112539/best.pth'
+    # checkpoint = '20230916-212620/best.pth'
+    checkpoint = '20230918-190354/best.pth'
     ckpt = torch.load('checkpoints/' + checkpoint)
     model.load_state_dict(ckpt, strict=True)
 

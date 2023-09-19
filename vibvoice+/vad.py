@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 from model import VAD_CRN
-from Voice_Activity_Detector.vad import VAD
 from feature import stft, istft
 import argparse
 import sklearn.metrics
