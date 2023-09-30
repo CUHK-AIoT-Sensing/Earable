@@ -17,7 +17,7 @@ def vad_annotation(audio):
     spec = (torch.abs(torch.stft(audio, 640, 320, 640, return_complex=True)))
     spec = spec.sum(dim=1) ** 0.5
     spec = torch.nn.functional.avg_pool1d(spec, 20, 1, padding=10)[:, 1:]
-    threshold = spec.min() + 0.3 * spec.mean()
+    threshold = spec.min() + 1 * spec.mean()
     vad[spec > threshold] = 1
     return vad
 def snr_mix(noise_y, clean_y, snr, target_dB_FS, rir=None, eps=1e-6):
@@ -220,7 +220,7 @@ class V2SDataset(VoiceBankDataset):
         clean = torchaudio.functional.filtfilt(clean, self.a, self.b,)
         imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
 
-        imu *= 2 # magic number to compensate two modality
+        imu *= 4 # magic number to compensate two modality
         clean *= 4; imu *= 4 # This is a magic number to move the dBFS from 38 to 26
         return self.WILD(clean, imu, noise, snr, rir, file)
 class EMSBDataset(VoiceBankDataset):

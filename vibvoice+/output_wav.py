@@ -37,34 +37,9 @@ def inference(dataset, BATCH_SIZE, model):
                         fname = sample['file'][j]
                         fname = fname.replace(dir, output_dir)
                         wavfile.write(fname, 16000, predict[j])
-def selection_score(sample):
-    '''
-    1. correlation
-    2. entropy + similarity, Efficient Test-Time Model Adaptation without Forgetting, ICML'22
-    3. MixIT, MixCycle
-    4. PU-learning
-    '''
-    for i in range(sample['noisy'].shape[0]):
-        imu = sample['imu'][i]
-        noisy = sample['noisy'][i]
-        pearsonr = stats.pearsonr(imu[0], noisy[0])[0]
-        print(pearsonr)
-def test_time_adaptation(dataset, BATCH_SIZE, model):
-    test_loader = torch.utils.data.DataLoader(dataset=dataset, num_workers=1, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
-    model.train() # activate BN
-    for i, sample in enumerate(tqdm(test_loader)):
-        # selection_score(sample)
-        clean, predict = getattr(helper, 'test_' + model_name)(model, sample, device)
-        noise = clean - predict
-        # for j in range(BATCH_SIZE):
-        #     fname = sample['file'][j]
-        #     fname = fname.replace(dir, output_dir)
-        #     wavfile.write(fname, 16000, predict[j])
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', action="store", type=str, default='DPCRN', required=False, help='choose the model')
-    parser.add_argument('--TTA', action="store_true", default=False, required=False, help='inference or TTA')
     parser.add_argument('--dataset', action="store", type=str, default='V2S', required=False, help='choose the model')
 
     args = parser.parse_args()
@@ -95,19 +70,11 @@ if __name__ == "__main__":
         dataset = V2SDataset(data_list, mode='WILD')
         dir = '../V2S/'
         output_dir = '../V2S_tmp/'
-    # checkpoint = '20230903-145505/best.pth'
-    # checkpoint = '20230913-092655/best.pth'
-    # checkpoint  = '20230914-072918/best.pth'
-    # checkpoint = '20230914-103229/best.pth'
-    # checkpoint = '20230915-112539/best.pth'
-    # checkpoint = '20230916-212620/best.pth'
     checkpoint = '20230918-190354/best.pth'
+    # checkpoint = '20230923-200323/best.pth'
+    #checkpoint = '20230922-090224/best.pth'
     ckpt = torch.load('checkpoints/' + checkpoint)
     model.load_state_dict(ckpt, strict=True)
-
-    if args.TTA:
-        test_time_adaptation(dataset, 1, model)
-    else:
-        inference(dataset, 1, model)
+    inference(dataset, 1, model)
 
       

@@ -301,6 +301,53 @@ class CausalTransConvBlock(nn.Module):
         self.cache = update_cache
         return x
     
+class DPCRN_basic(nn.Module):
+    """
+    Input: [batch size, channels=1, T, n_fft]
+    Output: [batch size, T, n_fft]
+    """
+    def __init__(self, channel_list = [16, 32, 64, 128, 256], init_channel=1, pad=[], last_channel=1):
+        super(DPCRN_basic, self).__init__()
+        # Encoder
+        self.pad = pad
+        layers = []
+        for i in range(len(channel_list)):
+            if i == 0:
+                layers.append(CausalConvBlock(init_channel, channel_list[i]))
+            else:
+                layers.append(CausalConvBlock(channel_list[i-1], channel_list[i]))
+        self.conv_blocks = nn.ModuleList(layers)
+
+        self.rnn_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], 'GRU', bidirectional=False)
+
+        layers = []
+        for i in range(len(channel_list)-1, -1, -1):
+            layers.append(nn.Conv2d(channel_list[i], channel_list[i], kernel_size=(1, 1), stride=(1, 1), padding=(0, 0)))
+        self.skip_convs = nn.ModuleList(layers)
+        
+        layers = []
+        for i in range(len(channel_list)-1, -1, -1):
+            if i == 0:
+                layers.append(CausalTransConvBlock(channel_list[i], last_channel, activation=nn.Identity()))
+            else:
+                layers.append(CausalTransConvBlock(channel_list[i], channel_list[i-1]))
+        self.trans_conv_blocks = nn.ModuleList(layers)
+
+    def forward(self, x):
+        Res = []
+        d = x
+        for layer in self.conv_blocks:
+            d = layer(d)
+            Res.append(d)
+
+        d = self.rnn_layer(d)
+
+        for i, (layer, skip) in enumerate(zip(self.trans_conv_blocks, self.skip_convs)):
+            d = layer(d + skip(Res.pop()))
+            if i in self.pad:
+                d = torch.nn.functional.pad(d, (0, 0, 0, 1, ), value=0)
+        return d
+        
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()

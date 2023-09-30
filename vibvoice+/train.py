@@ -80,12 +80,6 @@ if __name__ == "__main__":
     lr = 0.00001
     EPOCH = 20
     checkpoint = None
-    # checkpoint = '20230903-145505/best.pth'
-    # checkpoint = '20230913-092655-default/best.pth'
-    # checkpoint = '20230914-072918/best.pth'
-    # checkpoint = '20230915-112539/best.pth'
-    # checkpoint = '20230916-135656/best.pth'
-    # checkpoint = '20230918-132144/best.pth'
     noises = [
               'json/ASR_aishell-dev.json',
               'json/other_DEMAND.json',

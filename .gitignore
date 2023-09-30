@@ -20,3 +20,4 @@ pretrained_models/
 *.pyc
 *.flac
 *.txt
+*.tar
