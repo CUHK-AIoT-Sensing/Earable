@@ -1,3 +1,5 @@
+import sys
+sys.path.append('../') 
 from model import DPCRN
 import torch
 import time
@@ -6,7 +8,6 @@ import scipy.signal as signal
 from feature import stft, istft
 import scipy.io.wavfile as wavfile
 from dataset import vad_annotation
-import matplotlib.pyplot as plt
 
 if __name__ == "__main__":
     import argparse

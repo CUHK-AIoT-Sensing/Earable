@@ -19,7 +19,7 @@ def inference(dataset, BATCH_SIZE, model):
     model.eval()
     with torch.no_grad():
         for i, sample in enumerate(tqdm(test_loader)):
-            clean, predict = getattr(helper, 'test_' + model_name)(model, sample, device)
+            clean, predict = helper.test_helper(model, sample, device)
             if len(clean.shape) == 3:
                 for j in range(BATCH_SIZE):
                     fname = sample['file'][j]

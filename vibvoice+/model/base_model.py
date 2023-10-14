@@ -113,15 +113,15 @@ class Dual_RNN_Block(nn.Module):
             bidirectional: If True, becomes a bidirectional LSTM. Default: False
     '''
 
-    def __init__(self, out_channels,
+    def __init__(self, in_channels, out_channels,
                  hidden_channels, rnn_type='GRU', norm='cln',
                  dropout=0, bidirectional=False):
         super(Dual_RNN_Block, self).__init__()
         # RNN model
         self.intra_rnn = getattr(nn, rnn_type)(
-            out_channels, hidden_channels//2 if bidirectional else hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
+            in_channels, hidden_channels//2 if bidirectional else hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
         self.inter_rnn = getattr(nn, rnn_type)(
-            out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=False)
+            in_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=False)
         # Norm
         self.intra_norm = select_norm(norm, out_channels, 4)
         self.inter_norm = select_norm(norm, out_channels, 4)

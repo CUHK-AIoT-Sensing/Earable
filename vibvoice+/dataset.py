@@ -115,19 +115,6 @@ class VoiceBankDataset:
         self.b = torch.from_numpy(self.b, ).to(dtype=torch.float)
         self.a = torch.from_numpy(self.a, ).to(dtype=torch.float)
         self.mode = mode
-    #  def Normalize(self, clean, imu, noise, snr, rir, file):
-    #     return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': clean, 'file': file, 'noise': noise}
-     def PN(self, clean, imu, noise, snr, rir, file):
-        # print(clean.max(), clean.min(), imu.max(), imu.min())
-        target_dB_FS = np.random.randint(-35, -15)
-        noisy, clean, noise, scaler = snr_mix(noise, clean, snr, target_dB_FS, rir, eps=1e-6)
-        imu *= scaler
-        imu = torch.clamp(imu, -1, 1) # avoid saturate
-        # print('after', clean.max(), clean.min(), imu.max(), imu.min())
-        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise}  
- 
-     def WILD(self, clean, imu, noise, snr, rir, file):
-        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(imu), 'noisy': clean, 'file': file}  
      def __getitem__(self, index):
         left, file = self.left_dataset[index]
         clean = left[:1, :]
@@ -148,12 +135,16 @@ class VoiceBankDataset:
         imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
         return self.PN(clean, imu, noise, snr, rir, file)
       
-     def __len__(self):
-        return len(self.left_dataset)
-class ABCSDataset(VoiceBankDataset):
-    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode='PN', length=5):
+
+class ABCSDataset():
+    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode='PN', length=5, dvector=None):
         self.snr_list = np.arange(snr[0], snr[1], 1)
         sr = 16000
+        if dvector is not None:
+            self.dvector = np.load(dvector)
+            self.dvector = {k: self.dvector[k] for k in self.dvector}
+        else:
+            self.dvector = dvector
         with open(data, 'r') as f:
             data = json.load(f)
             left = []
@@ -163,7 +154,6 @@ class ABCSDataset(VoiceBankDataset):
         self.noise = noise
         if self.noise is not None:
             self.noise_dataset = BaseDataset(noise, sample_rate=sr)
-            # self.noise_dataset = NoiseDataset(noise, sample_rate=sr)
             self.noise_length = len(self.noise_dataset)
         self.rir = rir
         if self.rir is not None:
@@ -175,9 +165,16 @@ class ABCSDataset(VoiceBankDataset):
         self.b = torch.from_numpy(self.b, ).to(dtype=torch.float)
         self.a = torch.from_numpy(self.a, ).to(dtype=torch.float)
         self.mode = mode
-    
+    def __len__(self):
+        return len(self.left_dataset)
     def __getitem__(self, index):
         left, file = self.left_dataset[index]
+        if self.dvector is not None:
+            speaker = file.split('/')[-2]
+            dvector = self.dvector[speaker]
+            dvector /= np.linalg.norm(dvector)
+        else:
+            dvector = None
         clean = left[:1, :]
         imu = left[1:, :]
         noise, _ = self.noise_dataset.__getitem__(np.random.randint(0, self.noise_length))
@@ -194,8 +191,15 @@ class ABCSDataset(VoiceBankDataset):
         
         clean = torchaudio.functional.filtfilt(clean, self.a, self.b,)
         imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
-        return self.PN(clean, imu, noise, snr, rir, file)
-class V2SDataset(VoiceBankDataset):
+
+        target_dB_FS = np.random.randint(-35, -15)
+        noisy, clean, noise, scaler = snr_mix(noise, clean, snr, target_dB_FS, rir, eps=1e-6)
+        imu *= scaler
+        imu = torch.clamp(imu, -1, 1) 
+        mixture = torch.cat([clean, noise], dim=0)
+        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 
+                'dvector': dvector, 'mixture': mixture}  
+class V2SDataset():
     def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode = 'PN'):
         self.snr_list = np.arange(snr[0], snr[1], 1)
         self.rir = rir
@@ -206,7 +210,8 @@ class V2SDataset(VoiceBankDataset):
         self.b = torch.from_numpy(self.b, ).to(dtype=torch.float)
         self.a = torch.from_numpy(self.a, ).to(dtype=torch.float)
         self.mode = mode
-    
+    def __len__(self):
+        return len(self.left_dataset)
     def __getitem__(self, index):
         left, file = self.left_dataset[index]
         clean = left[1:, :]
@@ -222,7 +227,7 @@ class V2SDataset(VoiceBankDataset):
 
         imu *= 4 # magic number to compensate two modality
         clean *= 4; imu *= 4 # This is a magic number to move the dBFS from 38 to 26
-        return self.WILD(clean, imu, noise, snr, rir, file)
+        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(imu), 'noisy': clean, 'file': file}  
 class EMSBDataset(VoiceBankDataset):
     def __init__(self, emsb, noise=None, mono=False, ratio=1, snr=(-5, 15), rir=None):
         self.dataset = []

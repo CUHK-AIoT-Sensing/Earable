@@ -1,3 +1,4 @@
-from .dpcrn_legacy import DPCRN
+from .enhancement import enhancement_DPCRN
+from .separation import separation_DPCRN
+
 from .discriminator import Discriminator, batch_pesq
-from .two_stage import TWO_STAGE

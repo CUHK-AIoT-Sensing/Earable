@@ -1,8 +1,11 @@
+import sys
+sys.path.append('../') 
 from model import *
 import torch
 import argparse
 from ptflops import get_model_complexity_info
 import time
+
 
 def latency_measure(model, data, device='cuda'):
     # causal inference is not suitable for synchronize timing
@@ -34,4 +37,4 @@ if __name__ == '__main__':
     macs, params = get_model_complexity_info(model, input_res=(1, 321, 50), as_strings=True, input_constructor=input_contructor,print_per_layer_stat=False , verbose=False)
     print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
     print('{:<30}  {:<8}'.format('Number of parameters: ', params))
-    latency_measure(model, input_contructor(0), device='cpu')
+    latency_measure(model, input_contructor(0), device='cuda')

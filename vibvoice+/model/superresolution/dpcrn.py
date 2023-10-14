@@ -5,15 +5,16 @@ This script based on
 '''
 import torch
 import torch.nn as nn
-from .base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
+from ..base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
 from torch.cuda.amp import autocast 
-class DPCRN(nn.Module):
+class superresolution_DPCRN(nn.Module):
     """
     Input: [batch size, channels=1, T, n_fft]
     Output: [batch size, T, n_fft]
     """
-    def __init__(self, channel_list = [16, 32, 64, 128, 256], single_modality=False, real_imag=False, early_fusion=False, add=True, pad_num=1, last_channel=1):
-        super(DPCRN, self).__init__()
+    def __init__(self, channel_list = [16, 32, 64, 128, 256], single_modality=True, real_imag=False, early_fusion=False, 
+                 add=True, pad_num=1, last_channel=1):
+        super(superresolution_DPCRN, self).__init__()
         self.single_modality = single_modality
         if self.single_modality:
             assert early_fusion == True; "if single_modality, early_fusion must be True"
@@ -54,8 +55,7 @@ class DPCRN(nn.Module):
                 layers.append(CausalConvBlock(channel_list[i-1], channel_list[i]))
         self.conv_blocks = nn.ModuleList(layers)
 
-        # RNN, try to keep bidirectional=False
-        self.rnn_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], 'GRU', bidirectional=False)
+        self.rnn_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], channel_list[-1], 'GRU', bidirectional=False)
 
         if self.add:
             num_c = 1
@@ -77,10 +77,11 @@ class DPCRN(nn.Module):
         self.trans_conv_blocks = nn.ModuleList(layers)
 
     def forward(self, x, acc):
+        # by default we don't use x (audio)
         Res = []
         if self.early_fusion:
             if self.single_modality:
-                d = x
+                d = acc
             else:
                 d = torch.cat((x, acc), 1)
             for layer in self.conv_blocks:
@@ -96,7 +97,7 @@ class DPCRN(nn.Module):
             d = d + self.map(acc)
 
         d = self.rnn_layer(d)
-
+        
         if self.add:
             for layer, skip in zip(self.trans_conv_blocks, self.skip_convs):
                 d = layer(d + skip(Res.pop()))
@@ -104,6 +105,7 @@ class DPCRN(nn.Module):
             for layer in self.trans_conv_blocks:
                 d = layer(torch.cat((d, Res.pop()), 1))
         return d * x
+
     def forward_causal(self, x, acc):
         Res = []
         if self.early_fusion:

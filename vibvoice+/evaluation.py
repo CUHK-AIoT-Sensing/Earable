@@ -3,16 +3,14 @@ import torch
 from pesq import pesq, pesq_batch
 from joblib import Parallel, delayed
 from pystoi.stoi import stoi
+import torchmetrics
 
 def eval(clean, predict):
     metrics = []
-    if len(clean.shape) == 3:
-        metrics.append(MAE(clean, predict))
-    else:
-        metrics.append(batch_pesq(clean, predict, 'wb'))
-        metrics.append(batch_pesq(clean, predict, 'nb'))
-        metrics.append(SI_SDR(clean, predict))
-        metrics.append(batch_stoi(clean, predict))
+    metrics.append(batch_pesq(clean, predict, 'wb'))
+    metrics.append(batch_pesq(clean, predict, 'nb'))
+    metrics.append(SI_SDR(clean, predict))
+    metrics.append(batch_stoi(clean, predict))
     return np.stack(metrics, axis=1)
 
 def SI_SDR(reference, estimation, sr=16000):
