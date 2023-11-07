@@ -1,1 +1,1 @@
-from .dpcrn import enhancement_DPCRN
+from .modelFactory import get_model_enhancement

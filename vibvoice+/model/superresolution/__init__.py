@@ -1,1 +1,1 @@
-from .dpcrn import superresolution_DPCRN
+from .modelFactory import get_model_superresolution

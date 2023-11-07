@@ -16,13 +16,14 @@ def inference(dataset, BATCH_SIZE, model):
         for i, sample in enumerate(tqdm(test_loader)):
             metric = getattr(helper, args.task + '_test')(model, sample, device)
             Metric.append(metric)
+
     avg_metric = np.round(np.mean(np.concatenate(Metric, axis=0), axis=0),2).tolist()
     print(avg_metric)
     return avg_metric
 
 def train(dataset, EPOCH, lr, BATCH_SIZE, model,):
     train_dataset, test_dataset = dataset
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, num_workers=16, batch_size=BATCH_SIZE, shuffle=True,
+    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, num_workers=0, batch_size=BATCH_SIZE, shuffle=True,
                                                drop_last=True, pin_memory=False)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
     save_dir = 'checkpoints/' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '/'
@@ -71,8 +72,7 @@ if __name__ == "__main__":
     torch.cuda.set_device(0)
     device = (torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
     # model_name = args.model
-    model = getattr(model, args.task + '_' + args.model)().to(device)
-    # model = globals()[model_name]().to(device)
+    model = getattr(model, 'get_model_' + args.task)().to(device)
     # model = torch.nn.DataParallel(model)
     rir = 'json/rir.json'
     BATCH_SIZE = 32

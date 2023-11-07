@@ -7,14 +7,14 @@ import torch
 import torch.nn as nn
 from ..base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
 from torch.cuda.amp import autocast 
-class separation_DPCRN(nn.Module):
+class DPCRN(nn.Module):
     """
     Input: [batch size, channels=1, T, n_fft]
     Output: [batch size, T, n_fft]
     """
     def __init__(self, channel_list = [16, 32, 64, 128, 256], single_modality=False, real_imag=False, early_fusion=False, 
                  add=True, pad_num=1, last_channel=2):
-        super(separation_DPCRN, self).__init__()
+        super(DPCRN, self).__init__()
         self.single_modality = single_modality
         if self.single_modality:
             assert early_fusion == True; "if single_modality, early_fusion must be True"

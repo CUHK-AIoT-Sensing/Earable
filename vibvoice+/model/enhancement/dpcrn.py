@@ -7,14 +7,14 @@ import torch
 import torch.nn as nn
 from ..base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
 from torch.cuda.amp import autocast 
-class enhancement_DPCRN(nn.Module):
+class DPCRN(nn.Module):
     """
     Input: [batch size, channels=1, T, n_fft]
     Output: [batch size, T, n_fft]
     """
     def __init__(self, channel_list = [16, 32, 64, 128, 256], single_modality=False, real_imag=False, early_fusion=False, 
-                 add=True, pad_num=1, last_channel=1, dvector=True):
-        super(enhancement_DPCRN, self).__init__()
+                 add=True, pad_num=1, last_channel=1):
+        super(DPCRN, self).__init__()
         self.single_modality = single_modality
         if self.single_modality:
             assert early_fusion == True; "if single_modality, early_fusion must be True"
@@ -55,11 +55,7 @@ class enhancement_DPCRN(nn.Module):
                 layers.append(CausalConvBlock(channel_list[i-1], channel_list[i]))
         self.conv_blocks = nn.ModuleList(layers)
 
-        self.dvector = dvector
-        if dvector:
-            self.rnn_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], channel_list[-1], 'GRU', bidirectional=False)
-        else:
-            self.rnn_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], channel_list[-1], 'GRU', bidirectional=False)
+        self.rnn_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], channel_list[-1], 'GRU', bidirectional=False)
 
         if self.add:
             num_c = 1
@@ -80,7 +76,7 @@ class enhancement_DPCRN(nn.Module):
                 layers.append(CausalTransConvBlock(channel_list[i]*num_c, channel_list[i-1]))
         self.trans_conv_blocks = nn.ModuleList(layers)
 
-    def forward(self, x, acc, dvector=None):
+    def forward(self, x, acc):
         Res = []
         if self.early_fusion:
             if self.single_modality:
@@ -99,13 +95,8 @@ class enhancement_DPCRN(nn.Module):
                 acc = layer(acc)
             d = d + self.map(acc)
 
-        if dvector is not None:
-            dvector = torch.tile(dvector[:, :, None, None], (1, 1, 1, d.shape[-1]))
-            d = torch.cat((d, dvector), 2)
-            d = self.rnn_layer(d)
-            d = d[:, :, :-1, :]
-        else:
-            d = self.rnn_layer(d)
+        d = self.rnn_layer(d)
+        
         if self.add:
             for layer, skip in zip(self.trans_conv_blocks, self.skip_convs):
                 d = layer(d + skip(Res.pop()))

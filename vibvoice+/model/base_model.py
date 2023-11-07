@@ -217,6 +217,7 @@ class Dual_RNN_Block(nn.Module):
         out = inter_rnn + intra_rnn
 
         return out
+
 class CausalConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()

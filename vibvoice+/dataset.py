@@ -140,11 +140,6 @@ class ABCSDataset():
     def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode='PN', length=5, dvector=None):
         self.snr_list = np.arange(snr[0], snr[1], 1)
         sr = 16000
-        if dvector is not None:
-            self.dvector = np.load(dvector)
-            self.dvector = {k: self.dvector[k] for k in self.dvector}
-        else:
-            self.dvector = dvector
         with open(data, 'r') as f:
             data = json.load(f)
             left = []
@@ -169,12 +164,6 @@ class ABCSDataset():
         return len(self.left_dataset)
     def __getitem__(self, index):
         left, file = self.left_dataset[index]
-        if self.dvector is not None:
-            speaker = file.split('/')[-2]
-            dvector = self.dvector[speaker]
-            dvector /= np.linalg.norm(dvector)
-        else:
-            dvector = None
         clean = left[:1, :]
         imu = left[1:, :]
         noise, _ = self.noise_dataset.__getitem__(np.random.randint(0, self.noise_length))
@@ -197,8 +186,7 @@ class ABCSDataset():
         imu *= scaler
         imu = torch.clamp(imu, -1, 1) 
         mixture = torch.cat([clean, noise], dim=0)
-        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 
-                'dvector': dvector, 'mixture': mixture}  
+        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 'mixture': mixture}  
 class V2SDataset():
     def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode = 'PN'):
         self.snr_list = np.arange(snr[0], snr[1], 1)

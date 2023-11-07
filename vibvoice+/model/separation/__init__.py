@@ -1,1 +1,1 @@
-from .dpcrn import separation_DPCRN
+from .modelFactory import get_model_separation
