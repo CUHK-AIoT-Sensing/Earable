@@ -98,7 +98,7 @@ class Flac():
         plt.savefig('compare.png')
     
 flac = Flac()
-flac.load('example.wav')
+flac.load('example_int16.wav')
 flac.encode()
 flac.decode()
 flac.latency(flac.encode, flac.decode)
@@ -112,6 +112,5 @@ flac.compare_stereo()
 flac.encode_stereo()
 flac.decode_stereo()
 flac.latency(flac.encode_stereo, flac.decode_stereo)
-
 flac.compare_stereo()
 

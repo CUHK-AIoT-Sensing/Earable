@@ -137,7 +137,7 @@ class VoiceBankDataset:
       
 
 class ABCSDataset():
-    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode='PN', length=5, dvector=None):
+    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode='PN', length=5):
         self.snr_list = np.arange(snr[0], snr[1], 1)
         sr = 16000
         with open(data, 'r') as f:

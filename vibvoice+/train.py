@@ -4,7 +4,7 @@ import model
 import numpy as np
 from tqdm.auto import tqdm
 import argparse
-import helper
+from helper import train_epoch, test_epoch
 import json
 import os
 import datetime
@@ -14,7 +14,7 @@ def inference(dataset, BATCH_SIZE, model):
     model.eval()
     with torch.no_grad():
         for i, sample in enumerate(tqdm(test_loader)):
-            metric = getattr(helper, args.task + '_test')(model, sample, device)
+            metric = test_epoch(model, sample, device)
             Metric.append(metric)
 
     avg_metric = np.round(np.mean(np.concatenate(Metric, axis=0), axis=0),2).tolist()
@@ -44,7 +44,7 @@ def train(dataset, EPOCH, lr, BATCH_SIZE, model,):
         model.train()
         with tqdm(total=len(train_loader)) as t:
             for i, sample in enumerate(train_loader):
-                loss = getattr(helper, args.task + '_train')(model, sample, optimizer, device, discriminator, optimizer_disc)
+                loss = train_epoch(model, sample, optimizer, device, discriminator, optimizer_disc)
                 Loss_list.append(loss)
                 t.set_description('Epoch %i' % e)
                 t.set_postfix(loss=np.mean(Loss_list))
@@ -64,7 +64,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', action="store_true", default=False, required=False)
     parser.add_argument('--adversarial', action="store_true", default=False, required=False)
-    parser.add_argument('--task', action="store", type=str, default='enhancement', required=False, help='choose the model')
     parser.add_argument('--model', action="store", type=str, default='DPCRN', required=False, help='choose the model')
     parser.add_argument('--dataset', '-d', action="store", type=str, default='ABCS', required=False, help='choose the mode')
 
@@ -72,7 +71,7 @@ if __name__ == "__main__":
     torch.cuda.set_device(0)
     device = (torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
     # model_name = args.model
-    model = getattr(model, 'get_model_' + args.task)().to(device)
+    model = getattr(model, args.model)().to(device)
     # model = torch.nn.DataParallel(model)
     rir = 'json/rir.json'
     BATCH_SIZE = 32
@@ -94,8 +93,8 @@ if __name__ == "__main__":
     if args.dataset == 'EMSB':
         dataset = [EMSBDataset('json/EMSB.json', noise=noise_file, ratio=0.8, mono=True, mode=mode), EMSBDataset('json/EMSB.json', noise=noise_file, ratio=-0.2, mono=True)]
     elif args.dataset == 'ABCS':
-        dataset = [ABCSDataset('json/ABCS_train.json', noise=noise_file, mode=mode, dvector='json/ABCS_train.npz'), 
-                   ABCSDataset('json/ABCS_dev.json', noise=noise_file, dvector='json/ABCS_dev.npz')]
+        dataset = [ABCSDataset('json/ABCS_train.json', noise=noise_file, mode=mode), 
+                   ABCSDataset('json/ABCS_dev.json', noise=noise_file)]
     elif args.dataset == 'VoiceBank':
         dataset = [VoiceBankDataset('json/voicebank_clean_trainset_wav.json', noise=noise_file, mode=mode), VoiceBankDataset('json/voicebank_clean_testset_wav.json', noise=noise_file)]
     else:
