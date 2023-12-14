@@ -329,7 +329,7 @@ class DPCRN_basic(nn.Module):
         layers = []
         for i in range(len(channel_list)-1, -1, -1):
             if i == 0:
-                layers.append(CausalTransConvBlock(channel_list[i], last_channel, activation=nn.Identity()))
+                layers.append(CausalTransConvBlock(channel_list[i], last_channel, activation=nn.Sigmoid()))
             else:
                 layers.append(CausalTransConvBlock(channel_list[i], channel_list[i-1]))
         self.trans_conv_blocks = nn.ModuleList(layers)
@@ -349,6 +349,18 @@ class DPCRN_basic(nn.Module):
                 d = torch.nn.functional.pad(d, (0, 0, 0, 1, ), value=0)
         return d
         
+class SNR_Predictor(nn.Module):
+    def __init__(self, ):
+        super(SNR_Predictor, self).__init__()
+        self.net = nn.GRU(321, 321, 1, batch_first=True, dropout=0, bidirectional=False)
+        self.fc1 = nn.Linear(321, 128)
+        self.fc2 = nn.Linear(128, 1)
+    def forward(self, x):
+        x = x.permute(0, 2, 1)
+        x, h = self.net(x)
+        x = torch.nn.functional.relu(self.fc1(x))
+        x = torch.nn.functional.sigmoid(self.fc2(x)).squeeze()
+        return x
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()

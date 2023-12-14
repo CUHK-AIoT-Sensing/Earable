@@ -1,55 +1,60 @@
 '''
 This script prepares the real inference and output saving
-It also contains test time adaptation (TTA)
+It also contains the unsupervised learning
 '''
 import torch
 from dataset import V2SDataset, ABCSDataset
-from model import *
-import scipy.io.wavfile as wavfile
-from tqdm import tqdm
+import model
 import argparse
-import helper
-import scipy.stats as stats
+from helper import unsupervised_train_epoch, test_epoch_save, AlterNet_E, AlterNet_M
 import json
-import matplotlib.pyplot as plt
-import numpy as np
+import datetime
+import os
+def train(dataset, EPOCH, lr, BATCH_SIZE, model, teacher_model):
+    train_loader = torch.utils.data.DataLoader(dataset=dataset, num_workers=8, batch_size=BATCH_SIZE, shuffle=True,
+                                               drop_last=True, pin_memory=False)
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
+    # optimizer1 = torch.optim.Adam(params=teacher_model.parameters(), lr=lr)
+    # optimizer2 = torch.optim.Adam(params=model.parameters(), lr=lr)
+    save_dir = 'checkpoints/' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '/'
+    os.mkdir(save_dir)
+    loss_best = 1000
+    ckpt_best = model.state_dict()
+    for e in range(EPOCH):
+        mean_lost = unsupervised_train_epoch(model, train_loader, optimizer, teacher_model, device='cuda')
+        # if e < EPOCH//2:
+        #     mean_lost = AlterNet_E(model, train_loader, optimizer1, device='cuda')
+        # else:
+        #     mean_lost = AlterNet_M(model, train_loader, optimizer2, device='cuda')
+        print('epoch', e, 'loss', mean_lost)
+        if mean_lost < loss_best:
+            ckpt_best = model.state_dict()
+            loss_best = mean_lost
+    torch.save(ckpt_best, save_dir + 'best.pth')
+    print('best loss is', loss_best)
 
-def inference(dataset, BATCH_SIZE, model):
-    test_loader = torch.utils.data.DataLoader(dataset=dataset, num_workers=1, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
-    model.eval()
-    with torch.no_grad():
-        for i, sample in enumerate(tqdm(test_loader)):
-            clean, predict = helper.test_helper(model, sample, device)
-            if len(clean.shape) == 3:
-                for j in range(BATCH_SIZE):
-                    fname = sample['file'][j]
-                    fname = fname.replace(dir, output_dir)[:-4]
-                    np.save(fname.replace('Audio', 'Mel') + '.npy', predict[j])
-                    if i % 100 == 0:
-                        plt.subplot(1, 2, 1)
-                        plt.imshow(clean[j])
-                        plt.subplot(1, 2, 2)
-                        plt.imshow(predict[j])
-                        plt.savefig(fname.replace('Audio', 'Figure')+ '.jpg')
-
-            else:
-                for j in range(BATCH_SIZE):
-                        fname = sample['file'][j]
-                        fname = fname.replace(dir, output_dir)
-                        wavfile.write(fname, 16000, predict[j])
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('--train', action="store_true", default=False, required=False)
     parser.add_argument('--model', action="store", type=str, default='DPCRN', required=False, help='choose the model')
     parser.add_argument('--dataset', action="store", type=str, default='V2S', required=False, help='choose the model')
 
     args = parser.parse_args()
     torch.cuda.set_device(1)
     device = (torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
-    model_name = args.model
-    model = globals()[model_name]().to(device)
+    se_model = getattr(model, args.model)().to(device)
+    teacher_model = getattr(model, args.model)().to(device)
+    # teacher_model = getattr(model, 'SNR_Predictor')().to(device)
+    # teacher_model = getattr(model, 'DPCRN_basic')().to(device)
     rir = 'json/rir.json'
     BATCH_SIZE = 16
-  
+    lr = 0.00001
+    EPOCH = 20
+    checkpoint = None
+    if checkpoint is not None:
+        ckpt = torch.load('checkpoints/' + checkpoint)
+        se_model.load_state_dict(ckpt, strict=True)
+        teacher_model.load_state_dict(ckpt, strict=True)
     if args.dataset == 'ABCS':
         noises = [
               'json/ASR_aishell-dev.json', 'json/other_DEMAND.json',
@@ -61,20 +66,12 @@ if __name__ == "__main__":
         dir = '../ABCS/'
         output_dir = '../ABCS_tmp/'
     else:
-        with open('json/V2S.json', 'r') as f:
-            data = json.load(f)
-            data_list = []
-            for speaker in data.keys():
-                for date in data[speaker]:
-                    data_list += data[speaker][date]
-        dataset = V2SDataset(data_list, mode='WILD')
+        dataset = V2SDataset('json/V2S.json', length=5)
         dir = '../V2S/'
         output_dir = '../V2S_tmp/'
-    checkpoint = '20230918-190354/best.pth'
-    # checkpoint = '20230923-200323/best.pth'
-    #checkpoint = '20230922-090224/best.pth'
-    ckpt = torch.load('checkpoints/' + checkpoint)
-    model.load_state_dict(ckpt, strict=True)
-    inference(dataset, 1, model)
+    if args.train:
+        train(dataset, EPOCH, lr, BATCH_SIZE, se_model, teacher_model)
+    # test_dataset = V2SDataset('json/V2S.json', length=None)
+    # test_epoch_save(se_model, test_dataset, BATCH_SIZE, dir, output_dir, device)
 
       

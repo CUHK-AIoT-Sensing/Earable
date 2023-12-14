@@ -134,10 +134,8 @@ class VoiceBankDataset:
         clean = torchaudio.functional.filtfilt(clean, self.a, self.b,)
         imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
         return self.PN(clean, imu, noise, snr, rir, file)
-      
-
 class ABCSDataset():
-    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode='PN', length=5):
+    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, length=5):
         self.snr_list = np.arange(snr[0], snr[1], 1)
         sr = 16000
         with open(data, 'r') as f:
@@ -159,7 +157,6 @@ class ABCSDataset():
         self.b, self.a = signal.butter(4, 100, 'highpass', fs=16000)
         self.b = torch.from_numpy(self.b, ).to(dtype=torch.float)
         self.a = torch.from_numpy(self.a, ).to(dtype=torch.float)
-        self.mode = mode
     def __len__(self):
         return len(self.left_dataset)
     def __getitem__(self, index):
@@ -188,34 +185,41 @@ class ABCSDataset():
         mixture = torch.cat([clean, noise], dim=0)
         return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 'mixture': mixture}  
 class V2SDataset():
-    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, mode = 'PN'):
+    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, length=None):
+        sr = 16000
+        with open(data, 'r') as f:
+            data = json.load(f)
+            data_list = []
+            for speaker in data.keys():
+                for date in data[speaker]:
+                    data_list += data[speaker][date]
+        self.left_dataset = BaseDataset(data_list, sample_rate=sr, length=length)
+
         self.snr_list = np.arange(snr[0], snr[1], 1)
         self.rir = rir
         self.noise = noise
         sr = 16000
-        self.left_dataset = BaseDataset(data, sample_rate=sr, length=None)
         self.b, self.a = signal.butter(4, 100, 'highpass', fs=16000)
         self.b = torch.from_numpy(self.b, ).to(dtype=torch.float)
         self.a = torch.from_numpy(self.a, ).to(dtype=torch.float)
-        self.mode = mode
     def __len__(self):
         return len(self.left_dataset)
     def __getitem__(self, index):
         left, file = self.left_dataset[index]
-        clean = left[1:, :]
+        noisy = left[1:, :]
         imu = left[:1, :]
 
-        noise = torch.zeros_like(clean)
-        use_reverb = False if self.rir is None else bool(np.random.random(1) < 0.75)
-        rir = torchaudio.load(self.rir[np.random.randint(0, self.rir_length)][0])[0] if use_reverb else None
-        snr = np.random.choice(self.snr_list)
+        #noise = torch.zeros_like(noisy)
+        #use_reverb = False if self.rir is None else bool(np.random.random(1) < 0.75)
+        #rir = torchaudio.load(self.rir[np.random.randint(0, self.rir_length)][0])[0] if use_reverb else None
+        #snr = np.random.choice(self.snr_list)
         
-        clean = torchaudio.functional.filtfilt(clean, self.a, self.b,)
+        noisy = torchaudio.functional.filtfilt(noisy, self.a, self.b,)
         imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
 
-        imu *= 4 # magic number to compensate two modality
-        clean *= 4; imu *= 4 # This is a magic number to move the dBFS from 38 to 26
-        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(imu), 'noisy': clean, 'file': file}  
+        imu *= 4 # magic number to compensate two modality, based on sensor property
+        noisy *= 4; imu *= 4 # This is a magic number to move the dBFS from 38 to 26
+        return {'imu': imu, 'clean': noisy, 'vad': vad_annotation(imu), 'noisy': noisy, 'file': file}  
 class EMSBDataset(VoiceBankDataset):
     def __init__(self, emsb, noise=None, mono=False, ratio=1, snr=(-5, 15), rir=None):
         self.dataset = []
