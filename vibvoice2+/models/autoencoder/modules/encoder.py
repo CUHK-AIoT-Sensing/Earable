@@ -98,13 +98,16 @@ class Encoder(torch.nn.Module):
             kernel_size=kernel_size, 
             stride=1, 
             bias=False)
-
+        self.fusion_conv = torch.nn.ModuleList()
         self.conv_blocks = torch.nn.ModuleList()
         in_channels = encode_channels
         for idx, stride in enumerate(strides):
             out_channels = encode_channels * channel_ratios[idx]
             self.conv_blocks += [
                 EncoderBlock(in_channels, out_channels, stride, bias=bias, mode=self.mode)]
+            self.fusion_conv +=[
+                Conv1d(in_channels=out_channels*2, out_channels=out_channels, kernel_size=1, stride=1, bias=False)
+            ]
             in_channels = out_channels
         self.num_blocks = len(self.conv_blocks)
         self.out_channels = out_channels
@@ -114,7 +117,21 @@ class Encoder(torch.nn.Module):
         for i in range(self.num_blocks):
             x = self.conv_blocks[i](x)
         return x
-    
+    def fusion_forward(self, x, v, index=0): 
+        x = self.conv(x)
+        for i in range(self.num_blocks):
+            x = self.conv_blocks[i](x)
+            if i == index:
+                x = torch.cat([x, v], dim=1)
+                x = self.fusion_conv[i](x)
+        return x
+    def early_exit(self, x, index=0):
+        x = self.conv(x)
+        for i in range(self.num_blocks):
+            x = self.conv_blocks[i](x)
+            if i == index:
+                break
+        return x
     def encode(self, x):
         check_mode(self.mode, inspect.stack()[0][3])
         x = self.conv.inference(x)

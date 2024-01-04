@@ -6,13 +6,13 @@ This script based on
 import torch
 import torch.nn as nn
 from .base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
-from torch.cuda.amp import autocast 
 class DPCRN(nn.Module):
     """
     Input: [batch size, channels=1, T, n_fft]
     Output: [batch size, T, n_fft]
     """
-    def __init__(self, channel_list = [16, 32, 64, 128, 256], single_modality=False, early_fusion=False, add=True, pad_num=1, last_channel=1):
+    def __init__(self, channel_list = [16, 32, 64, 128, 256], single_modality=False, real_imag=False, early_fusion=False, 
+                 add=True, pad_num=1, last_channel=1):
         super(DPCRN, self).__init__()
         self.single_modality = single_modality
         if self.single_modality:
@@ -20,11 +20,22 @@ class DPCRN(nn.Module):
         self.add = add
         self.early_fusion = early_fusion
         self.channel_list = channel_list
+        self.real_imag = real_imag
 
-        if self.early_fusion:
-            self.init_channel = 2
+        self.init_channel = 0
+        if self.real_imag:
+            last_channel = 3
+            self.init_channel += 3
         else:
-            self.init_channel = 1
+            self.init_channel += 1
+        if self.single_modality:
+            self.init_channel += 0
+        elif self.early_fusion:
+            self.init_channel += 1
+        else:
+            self.init_channel += 0
+
+        if not self.early_fusion:
             layers = []
             for i in range(len(channel_list)):
                 if i == 0:
@@ -63,7 +74,6 @@ class DPCRN(nn.Module):
             else:
                 layers.append(CausalTransConvBlock(channel_list[i]*num_c, channel_list[i-1]))
         self.trans_conv_blocks = nn.ModuleList(layers)
-
     def forward(self, x, acc):
         Res = []
         if self.early_fusion:

@@ -1,21 +1,22 @@
 import torch
 from feature import stft, istft
-from loss import get_loss, eval
+from loss import get_loss, eval, Spectral_Loss
 import scipy.io.wavfile as wavfile
 from tqdm import tqdm
 import copy
+import os
 def train_epoch(model, train_loader, optimizer, device='cuda', discriminator=None, optimizer_disc=None):
     Loss_list = []
     model.train()
     pbar = tqdm(train_loader)
     for sample in pbar:
         acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device)
-        vad = sample['vad'].to(device)
         noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
         clean_mag, _, _, _ = stft(noisy, 640, 320, 640)
         optimizer.zero_grad()
         acc, _, _, _ = stft(acc, 640, 320, 640)
         est_mag = model(noisy_mag, acc)
+        # loss = Spectral_Loss(est_mag, clean_mag)
         est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase")
         loss = get_loss(est_audio, clean.squeeze(1))
         if discriminator is not None:
@@ -44,35 +45,31 @@ def test_epoch(model, dataset, BATCH_SIZE, device='cuda'):
     with torch.no_grad():
         for sample in pbar:
             acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device); 
-            vad = sample['vad'].to(device)
             noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
-            clean_mag, _, _, _ = stft(clean, 640, 320, 640)
             acc, _, _, _ = stft(acc, 640, 320, 640)
             est_mag = model(noisy_mag, acc)
             est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase")    
             metric = eval(clean.squeeze(1), est_audio)
             Metric.append(metric)  
-    avg_metric = np.round(np.mean(np.concatenate(Metric, axis=0), axis=0),2).tolist()
+    avg_metric = np.round(np.mean(Metric, axis=0), 2).tolist()
     print(avg_metric)
     return avg_metric
 
-def test_epoch_save(model, dataset, BATCH_SIZE, dir, output_dir, device='cuda'):
+def test_epoch_save(model, dataset, dir, output_dir, device='cuda'):
     test_loader = torch.utils.data.DataLoader(dataset=dataset, num_workers=1, batch_size=1, shuffle=False, drop_last=True)
     pbar = tqdm(test_loader)
     model.eval()
     with torch.no_grad():
         for sample in pbar:
             acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device); 
-            vad = sample['vad'].to(device)
             noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
-            clean_mag, _, _, _ = stft(clean, 640, 320, 640)
             acc, _, _, _ = stft(acc, 640, 320, 640)
             est_mag = model(noisy_mag, acc)
-            est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase")  
-            for j in range(BATCH_SIZE):
-                fname = sample['file'][j]
-                fname = fname.replace(dir, output_dir)
-                wavfile.write(fname, 16000, est_audio[j])
+            est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase").cpu().numpy()
+            fname = sample['file'][0]
+            fname = fname.replace(dir, output_dir)
+            os.makedirs(os.path.dirname(fname), exist_ok=True)
+            wavfile.write(fname, 16000, est_audio[0])
 
 def RemixIT(i, sample, optimizer, model, teacher_model, device='cuda', t_momentum=0.95):
     acc = sample['imu'].to(device); noisy = sample['noisy'].to(device)
@@ -107,12 +104,16 @@ def RemixIT(i, sample, optimizer, model, teacher_model, device='cuda', t_momentu
         teacher_model.eval()
     return loss.item()
 def PSE_DP(i, sample, optimizer, model, teacher_model, device='cuda', t_momentum=0.95):
-    noisy = sample['noisy'].to(device)
+    noisy = sample['noisy']; acc = sample['imu']
     noisy_mag, noisy_phase, _, _ = stft(noisy, 640, 320, 640)
-    with torch.no_grad():
-        segsnr = teacher_model(noisy_mag, acc)
+    acc, _, _, _ = stft(acc, 640, 320, 640)
+    noisy_mag = torch.mean(noisy_mag, dim = -1,)
+    acc = torch.mean(acc, dim = -1,)
+    acc *= torch.sum(noisy_mag, dim = -1, keepdim=True) / torch.sum(acc, dim = -1, keepdim=True)
+    segsnr = torch.log10(acc / (noisy_mag + 1e-8) + 1e-8)
+    segsnr = torch.clip(segsnr, min=-10, max=35).unsqueeze(-1)
+    segsnr = (segsnr + 10) / 45 
 
-    # don't finish Data purification yet
     sample['clean'] = sample['noisy']
     sample['noisy'] += sample['noisy'][torch.randperm(sample['noisy'].shape[0])]
     acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device); 
@@ -152,23 +153,25 @@ def AlterNet_M(model, train_loader, optimizer, teacher_model, device='cuda'):
         noisy_mag, noisy_phase, _, _ = stft(noisy, 640, 320, 640)
         acc, _, _, _ = stft(acc, 640, 320, 640)
         with torch.no_grad():
-            clean_mag = teacher_model(acc)
+            mask = teacher_model(acc)
         optimizer.zero_grad()
         est_mag = model(noisy_mag, acc)
-        loss = torch.nn.functional.mse_loss(est_mag, clean_mag)
+        loss = torch.nn.functional.mse_loss(est_mag, mask * noisy_mag)
         Loss_list.append(loss)
         pbar.set_description("loss: %.3f" % (loss))
     return np.mean(Loss_list)
     
 
-def unsupervised_train_epoch(model, train_loader, optimizer, teacher_model, device='cuda'):
+def unsupervised_train_epoch(model, train_loader, optimizer, teacher_model, device='cuda', method='RemixIT'):
     teacher_model.eval()
     model.train()
     Loss_list = []
     pbar = tqdm(train_loader)
     for i, sample in enumerate(pbar):
-        loss = RemixIT(i, sample, optimizer, model, teacher_model, device)
-        # loss = PSE_DP(i, sample, optimizer, model, teacher_model, device)
+        if method == 'RemixIT':
+            loss = RemixIT(i, sample, optimizer, model, teacher_model, device)
+        else:
+            loss = PSE_DP(i, sample, optimizer, model, teacher_model, device)
         Loss_list.append(loss)
         pbar.set_description("loss: %.3f" % (loss))
     return np.mean(Loss_list)

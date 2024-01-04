@@ -4,6 +4,8 @@ import numpy as np
 import scipy.signal as signal
 import torchaudio
 import torch
+from model.compress import flac_codec, mp3_codec
+
 def tailor_dB_FS(y, target_dB_FS=-25, eps=1e-6):
     rms = (y ** 2).mean() ** 0.5
     scaler = 10 ** (target_dB_FS / 20) / (rms + eps)
@@ -54,8 +56,9 @@ def snr_mix(noise_y, clean_y, snr, target_dB_FS, rir=None, eps=1e-6):
             clean_y = clean_y / noisy_y_scalar
             noise_y = noise_y / noisy_y_scalar
         return noisy_y, clean_y, noise_y, noisy_scalar
+
 class BaseDataset:
-    def __init__(self, files=None, pad=True, sample_rate=16000, length=5, stride=3):
+    def __init__(self, files=None, pad=True, sample_rate=16000, length=5, stride=3, codec=None):
         """
         files should be a list [(file, length)]
         """
@@ -65,6 +68,7 @@ class BaseDataset:
         self.length = length
         self.stride = stride
         self.pad = True
+        self.codec = codec
         for info in files:
             _, file_length = info
             if self.length is None:
@@ -84,14 +88,18 @@ class BaseDataset:
             if index >= examples:
                 index -= examples
                 continue
+            if self.codec is not None:
+                file = file.replace('Audio', self.codec).replace('wav', self.codec.split('_')[0])
             if self.length is None:
                 data, _ = torchaudio.load(file)
                 return data, file
             else:
                 data, _ = torchaudio.load(file, frame_offset=self.stride * index * self.sample_rate, num_frames=self.length * self.sample_rate)
                 if data.shape[-1] < (self.sample_rate * self.length):
-                    pad_before = np.random.randint((self.sample_rate *self.length) - data.shape[-1])
-                    pad_after = (self.sample_rate *self.length) - data.shape[-1] - pad_before
+                    pad_before = 0
+                    pad_after = (self.sample_rate *self.length) - data.shape[-1]
+                    # pad_before = np.random.randint((self.sample_rate *self.length) - data.shape[-1])
+                    # pad_after = (self.sample_rate *self.length) - data.shape[-1] - pad_before
                     data = torch.nn.functional.pad(data, (pad_before, pad_after, 0, 0), 'constant')
                 return data, file
 class VoiceBankDataset():
@@ -143,7 +151,7 @@ class VoiceBankDataset():
         mixture = torch.cat([clean, noise], dim=0)
         return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 'mixture': mixture}  
 class ABCSDataset():
-    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, length=5):
+    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, length=5, codec = 'mp3_16k'):
         self.snr_list = np.arange(snr[0], snr[1], 1)
         sr = 16000
         with open(data, 'r') as f:
@@ -151,7 +159,8 @@ class ABCSDataset():
             left = []
             for speaker in data.keys():
                 left += data[speaker]
-            self.left_dataset = BaseDataset(left, sample_rate=sr, length=length)
+            self.codec_dataset = BaseDataset(left, sample_rate=sr, length=length, codec=codec)
+            self.dataset = BaseDataset(left, sample_rate=sr, length=length)
         self.noise = noise
         if self.noise is not None:
             self.noise_dataset = BaseDataset(noise, sample_rate=sr)
@@ -166,9 +175,11 @@ class ABCSDataset():
         self.b = torch.from_numpy(self.b, ).to(dtype=torch.float)
         self.a = torch.from_numpy(self.a, ).to(dtype=torch.float)
     def __len__(self):
-        return len(self.left_dataset)
+        return len(self.dataset)
     def __getitem__(self, index):
-        left, file = self.left_dataset[index]
+        raw, raw_file = self.dataset[index]
+        raw = raw[:1, :]
+        left, file = self.codec_dataset[index]
         clean = left[:1, :]
         imu = left[1:, :]
         noise, _ = self.noise_dataset.__getitem__(np.random.randint(0, self.noise_length))
@@ -189,9 +200,10 @@ class ABCSDataset():
         target_dB_FS = np.random.randint(-35, -15)
         noisy, clean, noise, scaler = snr_mix(noise, clean, snr, target_dB_FS, rir, eps=1e-6)
         imu = tailor_dB_FS(imu, target_dB_FS)[0]
-
-        mixture = torch.cat([clean, noise], dim=0)
-        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 'mixture': mixture}  
+        if rir is not None:
+            raw = torchaudio.functional.fftconvolve(raw, rir)[:len(raw)]
+        raw *= scaler
+        return {'imu': imu, 'clean': clean, 'noisy': noisy, 'file': file, 'noise': noise, 'raw': raw}  
   
 class EMSBDataset():
     def __init__(self, emsb, noise=None, mono=False, ratio=1, snr=(-5, 15), rir=None):
@@ -272,11 +284,48 @@ class V2SDataset():
         return len(self.left_dataset)
     def __getitem__(self, index):
         left, file = self.left_dataset[index]
-        noisy = left[:1, :]
-        imu = left[1:, :]
+        noisy = left[1:, :]
+        imu = left[:1, :]
         
         noisy = torchaudio.functional.filtfilt(noisy, self.a, self.b,)
         imu = torchaudio.functional.filtfilt(imu, self.a, self.b,)
 
+        imu *= 4 # magic number to compensate two modality, based on sensor property
         noisy *= 4; imu *= 4 # This is a magic number to move the dBFS from 38 to 26
         return {'imu': imu, 'clean': noisy, 'vad': vad_annotation(imu), 'noisy': noisy, 'file': file}
+    
+if __name__ == "__main__":
+    import scipy.io.wavfile as wavfile
+    import os
+    from tqdm import tqdm
+    # directly run the script to save the dataset (noisy (2-channel: audio+imu), clean)
+    rir = 'json/rir.json'
+    dataset = 'ABCS'
+    BATCH_SIZE = 1
+    noises = [
+              'json/ASR_aishell-dev.json',
+              'json/other_DEMAND.json',
+              ]
+    noise_file = []
+    for noise in noises:
+        noise_file += json.load(open(noise, 'r'))
+
+    datasets = [ABCSDataset('json/ABCS_train.json', noise=noise_file), 
+                   ABCSDataset('json/ABCS_dev.json', noise=noise_file),
+                   ABCSDataset('json/ABCS_test.json', noise=noise_file)]
+
+    ori_folder = '../ABCS/Audio'
+    Noisy_folder = '../ABCS_tmp/Noisy'
+    Clean_folder = '../ABCS_tmp/Clean'
+    for dataset in datasets:
+        loader = torch.utils.data.DataLoader(dataset=dataset, num_workers=1, batch_size=1, shuffle=False, pin_memory=True)
+        for sample in tqdm(loader):
+            acc = sample['imu'][0].numpy(); noisy = sample['noisy'][0].numpy(); clean = sample['clean'][0].numpy(); file = sample['file'][0]
+            noisy = np.concatenate([noisy, acc], axis=0)
+            noisy_file = file.replace(ori_folder, Noisy_folder)
+            clean_file = file.replace(ori_folder, Clean_folder)
+
+            os.makedirs(os.path.dirname(noisy_file), exist_ok=True)
+            os.makedirs(os.path.dirname(clean_file), exist_ok=True)
+            wavfile.write(noisy_file, 16000, noisy.T)
+            wavfile.write(clean_file, 16000, clean.T)

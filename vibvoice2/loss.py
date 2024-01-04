@@ -31,11 +31,15 @@ def get_loss(est_audio, reference, vad=1):
     loss += MultiResolutionSTFTLoss(est_audio, reference, vad) 
     return loss
 def eval(clean, predict):
+    if len(clean.shape) == 3:
+        clean = clean.squeeze(1)
+    if len(predict.shape) == 3:
+        predict = predict.squeeze(1)
     metrics = []
     clean_npy = clean.cpu().numpy()
     predict_npy = predict.cpu().numpy()
-    pesq_wb = pesq_batch(16000, clean_npy, predict_npy, 'wb', n_processor=4, on_error=PesqError.RETURN_VALUES)
-    pesq_nb = pesq_batch(16000, clean_npy, predict_npy, 'nb', n_processor=4, on_error=PesqError.RETURN_VALUES)
+    pesq_wb = pesq_batch(16000, clean_npy, predict_npy, 'wb', n_processor=8, on_error=PesqError.RETURN_VALUES)
+    pesq_nb = pesq_batch(16000, clean_npy, predict_npy, 'nb', n_processor=8, on_error=PesqError.RETURN_VALUES)
     metrics += [np.mean(pesq_wb), np.mean(pesq_nb)]
 
     stoi = np.mean(batch_stoi(clean_npy, predict_npy))
@@ -66,9 +70,9 @@ def MultiResolutionSTFTLoss(x, y, vad=1):
     loss = 0
     for fft, hop, win in zip(fft_size, hop_size, win_length):
         window = torch.hann_window(win).to(x.device)
-        x_stft = torch.stft(x, fft, hop, win, window, return_complex=True)
+        x_stft = torch.stft(x,  fft, hop, win, window, return_complex=True)
         x_mag = torch.sqrt(torch.clamp((x_stft.real**2) + (x_stft.imag**2), min=1e-8))
-        y_stft = torch.stft(y, fft, hop, win, window, return_complex=True)
+        y_stft = torch.stft(y,  fft, hop, win, window, return_complex=True)
         y_mag = torch.sqrt(torch.clamp((y_stft.real**2) + (y_stft.imag**2), min=1e-8))
         loss += Spectral_Loss(x_mag, y_mag, vad)
     return loss

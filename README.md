@@ -2,9 +2,17 @@
 This is a repo for all the ear-worn device related projects at CUHK AIoT Lab. This project is lead by Lixing He, with the supervision from Prof. Guoliang Xing and Prof. Zhenyu Yan.
 
 # Contents
+## VibVoice
 * vibvoice: Mobisys 2022 paper: " <a href="https://dl.acm.org/doi/abs/10.1145/3495243.3560519"> Towards Bone-Conducted Vibration Speech Enhancement on Head-Mounted Wearables </a>".
-* vibvoice+: focus on unsupervised learning
-* vibvoice2: focus on computation offloading
+* vibvoice+: unsupervised learning on wild dataset
+
+## VibVoice2
+* vibvoice2 (baseline): post-processing of traditional codec
+* vibvoice2+: ongoing 
+
+## Silent Speech
 * silent speech: focus on parkinson disease
+
+## Misc
 * 3dmodel: all the models for prototype. For details, please also take a look at "data collection tool".
 * [data collection tool](https://github.com/lixinghe1999/Raspberry-Pi), specifically, all the data will go to a Raspberry-Pi.

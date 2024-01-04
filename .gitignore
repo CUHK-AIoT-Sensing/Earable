@@ -11,6 +11,7 @@ pretrained_models/
 *.bz2
 *.th
 *.wav
+*.mp3
 *.pth
 *.ckpt
 *.npz
@@ -21,3 +22,4 @@ pretrained_models/
 *.flac
 *.txt
 *.tar
+*.pkl

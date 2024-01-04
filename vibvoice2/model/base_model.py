@@ -319,7 +319,7 @@ class DPCRN_basic(nn.Module):
                 layers.append(CausalConvBlock(channel_list[i-1], channel_list[i]))
         self.conv_blocks = nn.ModuleList(layers)
 
-        self.rnn_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], channel_list[-1], 'GRU', bidirectional=False)
+        self.rnn_layer = Dual_RNN_Block(channel_list[-1], channel_list[-1], 'GRU', bidirectional=False)
 
         layers = []
         for i in range(len(channel_list)-1, -1, -1):
