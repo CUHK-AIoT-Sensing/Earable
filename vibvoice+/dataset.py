@@ -194,7 +194,7 @@ class ABCSDataset():
         return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 'mixture': mixture}  
   
 class EMSBDataset():
-    def __init__(self, emsb, noise=None, mono=False, ratio=1, snr=(-5, 15), rir=None):
+    def __init__(self, emsb, noise=None, mono=False, ratio=1, snr=(-5, 15), rir=None, length=5):
         self.dataset = []
         self.mono = mono
         self.ratio = ratio
@@ -209,12 +209,12 @@ class EMSBDataset():
             else:
                 left = left[-int(len(data['left']) * self.ratio):]
                 right = right[-int(len(data['right']) * self.ratio):]
-            self.left_dataset = BaseDataset(left, sample_rate=sr)
-            self.right_dataset = BaseDataset(right, sample_rate=sr)
+            self.left_dataset = BaseDataset(left, sample_rate=sr, length=length)
+            # self.right_dataset = BaseDataset(right, sample_rate=sr, length=length)
         self.noise_dataset = noise
         if self.noise_dataset is not None:
+            self.noise_dataset = BaseDataset(noise, sample_rate=sr)
             self.noise_length = len(self.noise_dataset)
-
         self.rir = rir
         if self.rir is not None:
             with open(rir, 'r') as f:

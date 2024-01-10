@@ -36,7 +36,7 @@ def test_epoch(model, dataset, BATCH_SIZE, device='cuda'):
             est_mag = model(noisy_mag, acc)
             est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase")    
             metric = eval(raw, est_audio)
-            Metric.append(metric)  
-    avg_metric = np.round(np.mean(np.concatenate(Metric, axis=0), axis=0),2).tolist()
+            Metric.append(metric)              
+    avg_metric = np.round(np.mean(Metric, 0), 2).tolist()
     print(avg_metric)
     return avg_metric

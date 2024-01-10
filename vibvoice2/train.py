@@ -32,6 +32,7 @@ if __name__ == "__main__":
     parser.add_argument('--train', action="store_true", default=False, required=False)
     parser.add_argument('--model', action="store", type=str, default='DPCRN', required=False, help='choose the model')
     parser.add_argument('--dataset', '-d', action="store", type=str, default='ABCS', required=False, help='choose the mode')
+    parser.add_argument('--codec', '-c', action="store", type=str, default='mp3_16k', required=False, help='choose the codec')
 
     args = parser.parse_args()
     torch.cuda.set_device(0)
@@ -43,7 +44,7 @@ if __name__ == "__main__":
     BATCH_SIZE = 16
     lr = 0.0001
     EPOCH = 20
-    checkpoint = None
+    checkpoint = '20240104-154830'
     os.makedirs('tmp', exist_ok=True)
     # checkpoint = '20230918-190354/best.pth'
     noises = [
@@ -58,17 +59,20 @@ if __name__ == "__main__":
         dataset = [EMSBDataset('json/EMSB.json', noise=noise_file, ratio=0.8, mono=True), 
                    EMSBDataset('json/EMSB.json', noise=noise_file, ratio=-0.2, mono=True)]
     elif args.dataset == 'ABCS':
-        dataset = [ABCSDataset('json/ABCS_train.json', noise=noise_file), 
-                   ABCSDataset('json/ABCS_dev.json', noise=noise_file)]
+        dataset = [ABCSDataset('json/ABCS_train.json', noise=noise_file, codec=args.codec), 
+                   ABCSDataset('json/ABCS_dev.json', noise=noise_file, codec=args.codec)]
     elif args.dataset == 'VoiceBank':
         dataset = [VoiceBankDataset('json/voicebank_clean_trainset_wav.json', noise=noise_file), 
                    VoiceBankDataset('json/voicebank_clean_testset_wav.json', noise=noise_file)]
     else:
         raise ValueError('dataset not found')
     if checkpoint is not None:
-        ckpt = torch.load('checkpoints/' + checkpoint)
+        list_ckpt = os.listdir('checkpoints/' + checkpoint)
+        list_ckpt.sort()
+        ckpt_name = 'checkpoints/' + checkpoint + '/' + list_ckpt[-1]
+        ckpt = torch.load(ckpt_name)
+        print('load checkpoint:', ckpt_name)
         se_model.load_state_dict(ckpt, strict=True)
-
     if args.train:
         train(dataset, EPOCH, lr, BATCH_SIZE, se_model)
     else:

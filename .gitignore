@@ -23,3 +23,4 @@ pretrained_models/
 *.txt
 *.tar
 *.pkl
+*.pt

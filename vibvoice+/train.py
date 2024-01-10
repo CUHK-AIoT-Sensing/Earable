@@ -6,11 +6,10 @@ from helper import train_epoch, test_epoch
 import json
 import os
 import datetime
-def train(dataset, EPOCH, lr, BATCH_SIZE, model,):
+def train(dataset, EPOCH, lr, BATCH_SIZE, model, optimizer, epoch, loss_best):
     train_dataset, test_dataset = dataset
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset, num_workers=8, batch_size=BATCH_SIZE, shuffle=True,
                                                drop_last=True, pin_memory=True)
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
     if checkpoint is None:
         save_dir = 'checkpoints/' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '/'
         os.mkdir(save_dir)
@@ -22,15 +21,20 @@ def train(dataset, EPOCH, lr, BATCH_SIZE, model,):
     else:
         discriminator = None
         optimizer_disc = None
-    loss_best = 1000
-    ckpt_best = model.state_dict()
-    for e in range(EPOCH):
+    for e in range(epoch+1, EPOCH):
         mean_lost = train_epoch(model, train_loader, optimizer, device, discriminator, optimizer_disc)
         if mean_lost < loss_best:
             ckpt_best = model.state_dict()
+            optimizer_best = optimizer.state_dict()
             loss_best = mean_lost
-            torch.save(ckpt_best, save_dir + args.model + '_' + args.dataset + '_' + str(e) + '_' + str(loss_best) + '.pth')
+            torch.save({
+            'epoch': e,
+            'model_state_dict': ckpt_best,
+            'optimizer_state_dict': optimizer_best,
+            'loss': loss_best,
+            },  save_dir + str(loss_best) + '.pt')
     test_epoch(model, test_dataset, BATCH_SIZE, device)
+    torch.save(ckpt_best, save_dir + 'best.pt')
 
 
 if __name__ == "__main__":
@@ -43,12 +47,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     torch.cuda.set_device(0)
     device = (torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
-    se_model = getattr(model, args.model)().to(device)
     rir = 'json/rir.json'
     BATCH_SIZE = 16
     lr = 0.0001
     EPOCH = 20
-    checkpoint = '20231228-111830'
+    se_model = getattr(model, args.model)().to(device)
+    optimizer = torch.optim.Adam(params=se_model.parameters(), lr=lr)
+
+    checkpoint = '20240109-204220'
     noises = [
               'json/ASR_aishell-dev.json',
               'json/other_DEMAND.json',
@@ -73,10 +79,16 @@ if __name__ == "__main__":
         list_ckpt.sort()
         ckpt_name = 'checkpoints/' + checkpoint + '/' + list_ckpt[-1]
         ckpt = torch.load(ckpt_name)
+        se_model.load_state_dict(ckpt['model_state_dict'])
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        epoch = ckpt['epoch']
+        loss_best = ckpt['loss']
         print('load checkpoint:', ckpt_name)
-        se_model.load_state_dict(ckpt, strict=True)
+    else:
+        loss_best = 1000
+        epoch = -1
     if args.train:
-        train(dataset, EPOCH, lr, BATCH_SIZE, se_model)
+        train(dataset, EPOCH, lr, BATCH_SIZE, se_model, optimizer, epoch, loss_best)
     else:
         test_epoch(se_model, dataset[-1], BATCH_SIZE, device)
 
