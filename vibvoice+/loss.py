@@ -4,7 +4,6 @@ from pesq import pesq, pesq_batch, PesqError
 from joblib import Parallel, delayed
 from pystoi.stoi import stoi
 import numpy as np
-import time
 
 EPS = 1e-12
 def get_mask(acc, vad):

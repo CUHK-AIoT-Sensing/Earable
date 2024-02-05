@@ -3,12 +3,14 @@ import math
 import numpy as np
 import scipy.signal as signal
 import torchaudio
+import soundfile as sf
 import torch
-def tailor_dB_FS(y, target_dB_FS=-25, eps=1e-6):
-    rms = (y ** 2).mean() ** 0.5
-    scaler = 10 ** (target_dB_FS / 20) / (rms + eps)
-    y *= scaler
-    return y, rms, scaler
+from feature import tailor_dB_FS, snr_mix, d_vector
+from resemblyzer import VoiceEncoder
+from tqdm import tqdm
+'''
+https://github.com/resemble-ai/Resemblyzer
+'''
 def vad_annotation(audio):
     '''
     according to "In-Ear-Voice: Towards Milli-Watt Audio Enhancement With Bone-Conduction Microphones for In-Ear Sensing Platforms, IoTDI'23"
@@ -20,40 +22,7 @@ def vad_annotation(audio):
     threshold = spec.min() + 1 * spec.mean()
     vad[spec > threshold] = 1
     return vad
-def snr_mix(noise_y, clean_y, snr, target_dB_FS, rir=None, eps=1e-6):
-        """
-        Args:
-            noise_y: 噪声
-            clean_y: 纯净语音
-            snr (int): 信噪比
-            target_dB_FS (int):
-            target_dB_FS_floating_value (int):
-            rir: room impulse response, None 或 np.array
-            eps: eps
-        Returns:
-            (noisy_y，clean_y)
-        """
-        if rir is not None:
-            clean_y = torchaudio.functional.fftconvolve(clean_y, rir)[:len(clean_y)]
-        clean_rms = (clean_y ** 2).mean() ** 0.5
-        noise_rms = (noise_y ** 2).mean() ** 0.5
-        snr_scalar = clean_rms / (10 ** (snr / 20)) / (noise_rms + eps)
-        noise_y *= snr_scalar
-        noisy_y = clean_y + noise_y
-        # Randomly select RMS value of dBFS between -15 dBFS and -35 dBFS and normalize noisy speech with that value
-        noisy_target_dB_FS = target_dB_FS
-        # 使用 noisy 的 rms 放缩音频
-        noisy_y, _, noisy_scalar = tailor_dB_FS(noisy_y, noisy_target_dB_FS)
-        clean_y *= noisy_scalar
-        noise_y *= noisy_scalar
-        # 合成带噪语音的时候可能会 clipping，虽然极少
-        # 对 noisy, clean_y, noise_y 稍微进行调整
-        if (noise_y.max() > 0.999).any():
-            noisy_y_scalar = (noisy_y).abs().max() / (0.99 - eps)  # 相当于除以 1
-            noisy_y = noisy_y / noisy_y_scalar
-            clean_y = clean_y / noisy_y_scalar
-            noise_y = noise_y / noisy_y_scalar
-        return noisy_y, clean_y, noise_y, noisy_scalar
+
 class BaseDataset:
     def __init__(self, files=None, pad=True, sample_rate=16000, length=5, stride=3):
         """
@@ -85,10 +54,14 @@ class BaseDataset:
                 index -= examples
                 continue
             if self.length is None:
-                data, _ = torchaudio.load(file)
+                # data, _ = torchaudio.load(file)
+                data, _ = sf.read(file, always_2d=True, dtype='float32')
+                data = torch.from_numpy(data).permute(1, 0)
                 return data, file
             else:
-                data, _ = torchaudio.load(file, frame_offset=self.stride * index * self.sample_rate, num_frames=self.length * self.sample_rate)
+                # data, _ = torchaudio.load(file, frame_offset=self.stride * index * self.sample_rate, num_frames=self.length * self.sample_rate)
+                data, _ = sf.read(file, frames=self.length * self.sample_rate, start=self.stride * index * self.sample_rate, always_2d=True, dtype='float32')
+                data = torch.from_numpy(data).permute(1, 0)
                 if data.shape[-1] < (self.sample_rate * self.length):
                     pad_before = np.random.randint((self.sample_rate *self.length) - data.shape[-1])
                     pad_after = (self.sample_rate *self.length) - data.shape[-1] - pad_before
@@ -143,15 +116,17 @@ class VoiceBankDataset():
         mixture = torch.cat([clean, noise], dim=0)
         return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 'mixture': mixture}  
 class ABCSDataset():
-    def __init__(self, data, noise=None, snr=(-5, 15), rir=None, length=5):
+    def __init__(self, data_json, noise=None, snr=(-5, 15), rir=None, length=5):
         self.snr_list = np.arange(snr[0], snr[1], 1)
         sr = 16000
-        with open(data, 'r') as f:
-            data = json.load(f)
-            left = []
-            for speaker in data.keys():
-                left += data[speaker]
-            self.left_dataset = BaseDataset(left, sample_rate=sr, length=length)
+        with open(data_json, 'r') as f:
+            json_data = json.load(f)
+        data = []
+        for speaker in json_data.keys():
+            data += json_data[speaker]
+        self.left_dataset = BaseDataset(data, sample_rate=sr, length=length)
+        self.prepare_vector_offline(data_json, data)
+
         self.noise = noise
         if self.noise is not None:
             self.noise_dataset = BaseDataset(noise, sample_rate=sr)
@@ -165,8 +140,33 @@ class ABCSDataset():
         self.b, self.a = signal.butter(4, 100, 'highpass', fs=16000)
         self.b = torch.from_numpy(self.b, ).to(dtype=torch.float)
         self.a = torch.from_numpy(self.a, ).to(dtype=torch.float)
+
     def __len__(self):
         return len(self.left_dataset)
+    def prepare_vector_offline(self, data_json, data):
+        embedder = VoiceEncoder('cuda')
+        save_name = data_json.replace('.json', '.npy')
+        import os
+        if os.path.exists(save_name):
+            self.vectors = np.load(save_name, allow_pickle=True).item()
+        else:
+            self.vectors = {}
+            count = {}
+            for (file, samples) in tqdm(data):
+                person = os.path.basename(file).split('_')[0]
+                vector = d_vector(file, embedder)
+                self.vectors[file] = vector
+                if person not in self.vectors:
+                    self.vectors[person] = vector
+                    count[person] = 1
+                else:
+                    self.vectors[person] += vector
+                    count[person] += 1
+            for person in count.keys():
+                self.vectors[person] /= count[person]
+            np.save(save_name, self.vectors)
+    def prepare_vector_online(self,):
+        return
     def __getitem__(self, index):
         left, file = self.left_dataset[index]
         clean = left[:1, :]
@@ -190,9 +190,8 @@ class ABCSDataset():
         noisy, clean, noise, scaler = snr_mix(noise, clean, snr, target_dB_FS, rir, eps=1e-6)
         imu = tailor_dB_FS(imu, target_dB_FS)[0]
 
-        mixture = torch.cat([clean, noise], dim=0)
-        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 'mixture': mixture}  
-  
+        dvector = self.vectors[file]
+        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 'dvector': dvector}  
 class EMSBDataset():
     def __init__(self, emsb, noise=None, mono=False, ratio=1, snr=(-5, 15), rir=None, length=5):
         self.dataset = []

@@ -3,21 +3,23 @@ from feature import stft, istft
 from loss import get_loss, eval
 import scipy.io.wavfile as wavfile
 from tqdm import tqdm
-import copy
-import os
 import numpy as np
+import os
+from .adversarial import calculate_discriminator_loss
 def train_epoch(model, train_loader, optimizer, device='cuda', discriminator=None, optimizer_disc=None):
     Loss_list = []
     model.train()
     pbar = tqdm(train_loader)
     for sample in pbar:
         acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device)
+        noise = sample['noise'].to(device); dvector = sample['dvector'].to(device)
         noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
+
         clean_mag, _, _, _ = stft(noisy, 640, 320, 640)
         optimizer.zero_grad()
         acc, _, _, _ = stft(acc, 640, 320, 640)
-        est_mag = model(noisy_mag, acc)
-        # loss = Spectral_Loss(est_mag, clean_mag)
+        est_mag = model(noisy_mag, acc, dvector)
+
         est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase")
         loss = get_loss(est_audio, clean.squeeze(1))
         if discriminator is not None:
@@ -46,16 +48,16 @@ def test_epoch(model, dataset, BATCH_SIZE, device='cuda'):
     with torch.no_grad():
         for sample in pbar:
             acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device); 
+            noise = sample['noise'].to(device);dvector = sample['dvector'].to(device)
             noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
             acc, _, _, _ = stft(acc, 640, 320, 640)
-            est_mag = model(noisy_mag, acc)
+            est_mag = model(noisy_mag, acc, dvector)
             est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase")    
             metric = eval(clean.squeeze(1), est_audio)
             Metric.append(metric)  
     avg_metric = np.round(np.mean(Metric, axis=0), 2).tolist()
     print(avg_metric)
     return avg_metric
-
 def test_epoch_save(model, dataset, dir, output_dir, device='cuda'):
     test_loader = torch.utils.data.DataLoader(dataset=dataset, num_workers=1, batch_size=1, shuffle=False, drop_last=True)
     pbar = tqdm(test_loader)
@@ -63,13 +65,14 @@ def test_epoch_save(model, dataset, dir, output_dir, device='cuda'):
     with torch.no_grad():
         for sample in pbar:
             acc = sample['imu'].to(device); noisy = sample['noisy'].to(device); clean = sample['clean'].to(device); 
+            dvector = sample['dvector'].to(device)
             noisy_mag, noisy_phase, noisy_real, noisy_imag = stft(noisy, 640, 320, 640)
             acc, _, _, _ = stft(acc, 640, 320, 640)
-            est_mag = model(noisy_mag, acc)
+            est_mag = model(noisy_mag, acc, dvector)
             est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase").cpu().numpy()
             fname = sample['file'][0]
             fname = fname.replace(dir, output_dir)
             os.makedirs(os.path.dirname(fname), exist_ok=True)
             wavfile.write(fname, 16000, est_audio[0])
-
-
+def train_epoch_tta(model, dataset, dir, output_dir, device='cuda', method='BN_adapt'):
+    return

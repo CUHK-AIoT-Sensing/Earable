@@ -3,9 +3,10 @@ from feature import stft, istft
 from loss import get_loss, eval
 import scipy.io.wavfile as wavfile
 from tqdm import tqdm
-import copy
-import os
 import numpy as np
+import os
+from .masker_tta import BN_adapt, Remix_snr, Remix_teacher
+from .adversarial import calculate_discriminator_loss
 def train_epoch(model, train_loader, optimizer, device='cuda', discriminator=None, optimizer_disc=None):
     Loss_list = []
     model.train()
@@ -17,7 +18,6 @@ def train_epoch(model, train_loader, optimizer, device='cuda', discriminator=Non
         optimizer.zero_grad()
         acc, _, _, _ = stft(acc, 640, 320, 640)
         est_mag = model(noisy_mag, acc)
-        # loss = Spectral_Loss(est_mag, clean_mag)
         est_audio = istft((est_mag.squeeze(1), noisy_phase.squeeze(1)), 640, 320, 640, input_type="mag_phase")
         loss = get_loss(est_audio, clean.squeeze(1))
         if discriminator is not None:
@@ -72,4 +72,15 @@ def test_epoch_save(model, dataset, dir, output_dir, device='cuda'):
             os.makedirs(os.path.dirname(fname), exist_ok=True)
             wavfile.write(fname, 16000, est_audio[0])
 
-
+def train_epoch_tta(model, dataset, dir, output_dir, device='cuda', method='BN_adapt'):
+    if method=='BN_adapt':
+        print('tta method: BN_adapt')
+        BN_adapt(model, dataset, dir, output_dir, device)
+    elif method == 'Remix_snr':
+        print('tta method: Remix_snr')
+        Remix_snr(model, dataset, dir, output_dir, device)
+    elif method == 'Remix_teacher':
+        print('tta method: Remix_teacher')
+        Remix_teacher(model, dataset, dir, output_dir, device)
+    else:
+        return NotImplementedError

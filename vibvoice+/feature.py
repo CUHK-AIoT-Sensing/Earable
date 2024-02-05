@@ -2,9 +2,13 @@ import os
 from functools import partial
 
 import librosa
+import torchaudio
 import numpy as np
 import torch
 import torch.nn as nn
+from resemblyzer import VoiceEncoder, preprocess_wav
+from pathlib import Path
+import numpy as np
 '''
 inherit functions from FullSubNet
 '''
@@ -76,7 +80,48 @@ def istft(features, n_fft, hop_length, win_length, length=None, input_type="comp
     return torch.istft(features, n_fft, hop_length, win_length, window=torch.hann_window(win_length, device=features.device),
                        length=length)
 
+def ASR(data = '../V2S_tmp/'):
+    import jiwer
+    from tqdm import tqdm
+    from modelscope.pipelines import pipeline
+    from modelscope.utils.constant import Tasks
+    inference_16k_pipline = pipeline(
+    task=Tasks.auto_speech_recognition,
+    model='damo/speech_paraformer_asr_nat-aishell1-pytorch', device='gpu')
+    rec_result = inference_16k_pipline(audio_in='https://isv-data.oss-cn-hangzhou.aliyuncs.com/ics/MaaS/ASR/test_audio/asr_example_zh.wav')
+    print(rec_result)
+    output = {}; bad_cases = {}
+    for speaker in os.listdir(data):
+        directory = os.path.join(data, speaker)
+        for date in os.listdir(directory):
+            hypotheses = []
+            references = []
+            directory_date = os.path.join(directory, date)
+            labels = os.path.join(directory_date, 'labels.txt')
+            labels = open(labels, 'r').readlines()
+            for label in tqdm(labels):
+                l = label.strip().split(' ')
+                file = l[0]
+                text = ''.join(l[1:])
+                file = os.path.join(directory_date, file+'.wav')
+                try: 
+                    rec_result = inference_16k_pipline(audio_in=file,)
+                    hypotheses.append(rec_result['text'])
+                    references.append(text)
+                    cer = jiwer.cer([text], [rec_result['text']])
+                    if cer > 0.25:
+                        bad_cases[file] = [text, rec_result['text'], cer]
+                except:
+                    pass
+            cer = jiwer.cer(hypotheses, references)
+            output[speaker + '_' + date] = round(cer * 100, 2)
+    return output, bad_cases
 
+def d_vector(fpath, encoder):
+    wav = preprocess_wav(Path(fpath))
+    embed = encoder.embed_utterance(wav)
+    np.set_printoptions(precision=3, suppress=True)
+    return embed
 def mag_phase(complex_tensor):
     mag, phase = torch.abs(complex_tensor), torch.angle(complex_tensor)
     return mag, phase
@@ -87,10 +132,59 @@ def norm_amplitude(y, scalar=None, eps=1e-6):
         scalar = np.max(np.abs(y)) + eps
 
     return y / scalar, scalar
-
-
+def snr_mix(noise_y, clean_y, snr, target_dB_FS, rir=None, eps=1e-6):
+        """
+        Args:
+            noise_y: 噪声
+            clean_y: 纯净语音
+            snr (int): 信噪比
+            target_dB_FS (int):
+            target_dB_FS_floating_value (int):
+            rir: room impulse response, None 或 np.array
+            eps: eps
+        Returns:
+            (noisy_y，clean_y)
+        """
+        if rir is not None:
+            clean_y = torchaudio.functional.fftconvolve(clean_y, rir)[:len(clean_y)]
+        clean_rms = (clean_y ** 2).mean() ** 0.5
+        noise_rms = (noise_y ** 2).mean() ** 0.5
+        snr_scalar = clean_rms / (10 ** (snr / 20)) / (noise_rms + eps)
+        noise_y *= snr_scalar
+        noisy_y = clean_y + noise_y
+        # Randomly select RMS value of dBFS between -15 dBFS and -35 dBFS and normalize noisy speech with that value
+        noisy_target_dB_FS = target_dB_FS
+        # 使用 noisy 的 rms 放缩音频
+        noisy_y, _, noisy_scalar = tailor_dB_FS(noisy_y, noisy_target_dB_FS)
+        clean_y *= noisy_scalar
+        noise_y *= noisy_scalar
+        # 合成带噪语音的时候可能会 clipping，虽然极少
+        # 对 noisy, clean_y, noise_y 稍微进行调整
+        if (noise_y.max() > 0.999).any():
+            noisy_y_scalar = (noisy_y).abs().max() / (0.99 - eps)  # 相当于除以 1
+            noisy_y = noisy_y / noisy_y_scalar
+            clean_y = clean_y / noisy_y_scalar
+            noise_y = noise_y / noisy_y_scalar
+        return noisy_y, clean_y, noise_y, noisy_scalar
+def dynamic_range_compression_torch(x, C=1, clip_val=1e-5):
+    return torch.log(torch.clamp(x, min=clip_val) * C)
+def mel_filterbank(n_fft, num_mels, sampling_rate, win_size, fmin, fmax, device='cuda'):
+    mel = librosa.filters.mel(sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax)
+    mel_basis = torch.from_numpy(mel).float().to(device)
+    hann_window = torch.hann_window(win_size).to(device)
+    return mel_basis, hann_window
+def mel_spectrogram(y, n_fft, mel_basis, hann_window, hop_size, win_size, center=False):
+    y = torch.nn.functional.pad(y, (int((n_fft-hop_size)/2), int((n_fft-hop_size)/2)), mode='reflect')
+    y = y.squeeze(1)
+    spec = torch.stft(y, n_fft, hop_length=hop_size, win_length=win_size, window=hann_window,
+                      center=center, pad_mode='reflect', normalized=False, onesided=True, return_complex=True)
+    spec = torch.abs(spec)
+    spec = torch.matmul(mel_basis, spec)
+    spec = dynamic_range_compression_torch(spec)
+    spec = spec.unsqueeze(1)
+    return spec
 def tailor_dB_FS(y, target_dB_FS=-25, eps=1e-6):
-    rms = np.sqrt(np.mean(y ** 2))
+    rms = (y ** 2).mean()**0.5
     scalar = 10 ** (target_dB_FS / 20) / (rms + eps)
     y *= scalar
     return y, rms, scalar

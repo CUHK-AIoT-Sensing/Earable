@@ -1,28 +1,38 @@
-'''
-This script based on 
-1. "DPCRN: Dual-path convolution recurrent network for single channel speech enhancement"
-2. "Fusing Bone-Conduction and Air-Conduction Sensors for Complex-Domain Speech Enhancement"
-'''
-import torch
 import torch.nn as nn
+from .generators import Generator
+import json
+import torch
 from .base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
-from torch.cuda.amp import autocast 
-class DPCRN(nn.Module):
+
+def vocoder(model_arch='VibVoice'):
+    if model_arch == 'VibVoice':
+        return VibVoice() 
+    else:
+        raise NotImplementedError
+class AttrDict(dict):
+    def __init__(self, *args, **kwargs):
+        super(AttrDict, self).__init__(*args, **kwargs)
+        self.__dict__ = self
+
+class DPCRN_masker(nn.Module):
     """
     Input: [batch size, channels=1, T, n_fft]
     Output: [batch size, T, n_fft]
     """
-    def __init__(self, channel_list = [16, 32, 64, 128, 256], single_modality=False, early_fusion=False, add=True, pad_num=1, last_channel=1):
-        super(DPCRN, self).__init__()
+    def __init__(self, channel_list = [16, 32, 64, 128, 256], single_modality=False, early_fusion=False , add=True, pad_num=1, last_channel=1, activation=nn.Sigmoid()):
+        super(DPCRN_masker, self).__init__()
         self.single_modality = single_modality
-        if self.single_modality:
-            assert early_fusion == True; "if single_modality, early_fusion must be True"
         self.add = add
         self.early_fusion = early_fusion
         self.channel_list = channel_list
+        if self.single_modality:
+            assert early_fusion == True; "if single_modality, early_fusion must be True"
 
         if self.early_fusion:
-            self.init_channel = 2
+            if self.single_modality:
+                self.init_channel = 1
+            else:
+                self.init_channel = 2
         else:
             self.init_channel = 1
             layers = []
@@ -57,7 +67,7 @@ class DPCRN(nn.Module):
         layers = []
         for i in range(len(channel_list)-1, -1, -1):
             if i == 0:
-                layers.append(CausalTransConvBlock(channel_list[i]*num_c, last_channel, activation=nn.Sigmoid()))
+                layers.append(CausalTransConvBlock(channel_list[i]*num_c, last_channel, activation=activation))
             elif i == pad_num:
                 layers.append(CausalTransConvBlock(channel_list[i]*num_c, channel_list[i-1], output_padding=(1, 0)))
             else:
@@ -91,7 +101,8 @@ class DPCRN(nn.Module):
         else:
             for layer in self.trans_conv_blocks:
                 d = layer(torch.cat((d, Res.pop()), 1))
-        return d * x
+        return d
+
 
     def forward_causal(self, x, acc):
         Res = []
@@ -121,4 +132,24 @@ class DPCRN(nn.Module):
         else:
             for layer in self.trans_conv_blocks:
                 d = layer.forward_causal(torch.cat((d, Res.pop()), 1))
-        return d * x
+        return d
+
+class VibVoice(nn.Module):
+    def __init__(self, ):
+        super(VibVoice, self).__init__()
+        self.basic_model = DPCRN_masker(channel_list = [16, 32, 64, 128], single_modality=False, early_fusion=False, add=True, pad_num=-1,last_channel=1, activation=nn.Identity())
+        config_file = 'model/config_v3_16k.json'
+        with open(config_file) as f:
+            data = f.read()
+        json_config = json.loads(data)
+        self.vocoder = Generator(AttrDict(json_config))
+
+        checkpoint_file = 'model/g_03650000'
+        state_dict_g = torch.load(checkpoint_file)
+        self.vocoder.load_state_dict(state_dict_g['generator'])
+    def analysis(self, x, acc):
+        mel = self.basic_model(x, acc)
+        mel = torch.nn.functional.pad(mel, (0, 0, 0, 1)) + x
+        return mel
+    def generation(self, mel):
+        return self.vocoder(mel.squeeze(1))
