@@ -1,3 +1,5 @@
+import sys
+sys.path.append('../') 
 import model
 import torch
 import scipy.signal as signal
@@ -11,7 +13,10 @@ def init_net():
     net.load_state_dict(checkpoint, strict=True)
     return net
 def inference_online(data, net):
-    data = np.transpose(data)
+    if data.shape[0] == 2:
+        pass
+    else:
+        data = np.transpose(data)
     noisy = data[:1, :] * 4
     acc = data[1:, :] * 4
 
@@ -37,4 +42,9 @@ def inference_online(data, net):
     est_audio = torch.istft(features[0,0], 640, 320, 640, window=torch.hamming_window(642, device=features.device)[1:-1], length=None, center=False).cpu().numpy()
     return est_audio
 
+if __name__ == '__main__':
+    net = init_net()
+    data = np.random.randn(2, 16000)
+    enhanced = inference_online(data, net)
+    print('done')
 
