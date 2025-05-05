@@ -25,3 +25,7 @@ vibvoice+/hifi-gan/cp_hifigan/
 *.tar
 *.pkl
 *.pt
+*.yaml
+*.yml
+*.out
+*.lixing

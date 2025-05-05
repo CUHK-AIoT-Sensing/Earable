@@ -2,7 +2,7 @@ import torch
 from dataset import EMSBDataset, ABCSDataset, VoiceBankDataset, V2SDataset
 import model
 import argparse
-from feature import ASR
+from feature import ASR, predict_sisnr
 import json
 import os
 import datetime
@@ -39,6 +39,7 @@ if __name__ == "__main__":
     parser.add_argument('--arch', action="store", type=str, default='VibVoice', required=False, help='choose the model')
     parser.add_argument('--model', action="store", type=str, default='masker', choices=['masker', 'vocoder', 'filter'], required=False, help='choose the model')
     parser.add_argument('--tta', action="store_true", default=False, required=False)
+    parser.add_argument('--save', action="store_true", default=False, required=False)
     parser.add_argument('--dataset', '-d', action="store", type=str, default='ABCS', required=False, help='choose the mode')
 
     args = parser.parse_args()
@@ -68,8 +69,10 @@ if __name__ == "__main__":
     # checkpoint = 'masker_20240123-140050'
     # checkpoint = 'filter_20240122-132406'
     # 
-    checkpoint = 'VibVoice_Lite_20240124-171926'
-    checkpoint = 'vocoder_VibVoice_20240118-143700'
+    checkpoint = 'masker_VibVoice_Lite_20240124-171926'
+    # checkpoint = 'Baseline_20240122-170839'
+
+    # checkpoint = 'vocoder_VibVoice_20240118-143700'
     noises = [
               'json/ASR_aishell-dev.json',
               'json/other_DEMAND.json',
@@ -111,17 +114,20 @@ if __name__ == "__main__":
             import pickle
             if args.tta: # only tta at real world dataset
                 mean_lost = train_epoch_tta(se_model, dataset[-1], dir, output_dir, device='cuda', method='BN_adapt')
-            else:
+            elif args.save:
                 test_epoch_save(se_model, dataset[-1], dir, output_dir, device)
+            
             result_dict, bad_cases = ASR(output_dir)
             with open('saved_dict.pkl', 'wb') as f:
                 pickle.dump(result_dict, f)
             with open('bad_cases.pkl', 'wb') as f:
                 pickle.dump(bad_cases, f)
-            # result_dict = pickle.load(open('saved_dict.pkl', 'rb')) 
+            #result_dict = pickle.load(open('saved_dict.pkl', 'rb')) 
             print(result_dict)
-            result_dict = list(result_dict.values())
-            print(np.mean(result_dict), np.std(result_dict))
+            #snr_dict = predict_sisnr(dir, output_dir)
+            # print(snr_dict)
+            # result_dict = list(result_dict.values())
+            # print(np.mean(result_dict), np.std(result_dict))
         else:
             test_epoch(se_model, dataset[-1], BATCH_SIZE, device)
             # for snr in [[-5, 0], [0, 5], [5, 10]]:

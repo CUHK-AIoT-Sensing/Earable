@@ -6,7 +6,7 @@ This script based on
 import torch
 import torch.nn as nn
 from .base_model import Dual_RNN_Block, CausalConvBlock, CausalTransConvBlock
-def masker(model_arch='VibVoice'):
+def masker(model_arch='VibVoice_Lite'):
     if model_arch == 'Baseline': # single-modality
         return Baseline()
     elif model_arch == 'VibVoice':

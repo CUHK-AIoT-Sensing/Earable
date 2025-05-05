@@ -116,7 +116,35 @@ def ASR(data = '../V2S_tmp/'):
             cer = jiwer.cer(hypotheses, references)
             output[speaker + '_' + date] = round(cer * 100, 2)
     return output, bad_cases
-
+def predict_sisnr(input_folder='../V2S/', out_folder = '../V2S_tmp/'):
+    from speechbrain.inference.metrics import SNREstimator as snrest
+    from tqdm import tqdm
+    snr_est_model = snrest.from_hparams(source="speechbrain/REAL-M-sisnr-estimator",savedir='pretrained_models/REAL-M-sisnr-estimator')
+    output = {}
+    for speaker in os.listdir(input_folder):
+        for date in os.listdir(os.path.join(input_folder, speaker)):
+            snr_list = []
+            for file in tqdm(os.listdir(os.path.join(input_folder, speaker, date))):
+                try:
+                    input_file = os.path.join(input_folder, speaker, date, file)
+                    output_file = os.path.join(out_folder, speaker, date, file)
+                    mix, fs = torchaudio.load(input_file)
+                    mix = mix[0]
+                    mix /= mix.abs().max()
+                    est_sources, fs = torchaudio.load(output_file)
+                    est_sources /= est_sources.abs().max()
+                    est_noise = mix - est_sources
+                    est_sources = torch.cat([est_sources, est_noise], dim=0)
+                    est_sources = est_sources.unsqueeze(0).permute(0, 2, 1)
+                    mix = mix.unsqueeze(0)
+                    snrhat = snr_est_model.estimate_batch(mix, est_sources)
+                    snrhat = torch.max(snrhat).item()
+                    snr_list.append(snrhat*10)
+                except:
+                    pass
+            snr = np.mean(snr_list)
+            output[speaker + '_' + date] = round(snr, 2)
+    return output
 def d_vector(fpath, encoder):
     wav = preprocess_wav(Path(fpath))
     embed = encoder.embed_utterance(wav)

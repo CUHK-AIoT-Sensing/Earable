@@ -4,14 +4,10 @@ This is a repo for all the ear-worn device related projects at CUHK AIoT Lab. Th
 # Contents
 ## VibVoice
 * vibvoice: Mobisys 2022 paper: " <a href="https://dl.acm.org/doi/abs/10.1145/3495243.3560519"> Towards Bone-Conducted Vibration Speech Enhancement on Head-Mounted Wearables </a>".
-* vibvoice+: unsupervised learning on wild dataset
+* vibvoice+: unsupervised learning and deployment on wild dataset
 
 ## VibVoice2
-* vibvoice2 (baseline): post-processing of traditional codec
-* vibvoice2+: ongoing 
-
-## Silent Speech
-* silent speech: focus on parkinson disease
+* vibvoice2: post-processing of traditional codec
 
 ## Misc
 * 3dmodel: all the models for prototype. For details, please also take a look at "data collection tool".

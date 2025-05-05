@@ -125,7 +125,7 @@ class ABCSDataset():
         for speaker in json_data.keys():
             data += json_data[speaker]
         self.left_dataset = BaseDataset(data, sample_rate=sr, length=length)
-        self.prepare_vector_offline(data_json, data)
+        # self.prepare_vector_offline(data_json, data)
 
         self.noise = noise
         if self.noise is not None:
@@ -190,8 +190,8 @@ class ABCSDataset():
         noisy, clean, noise, scaler = snr_mix(noise, clean, snr, target_dB_FS, rir, eps=1e-6)
         imu = tailor_dB_FS(imu, target_dB_FS)[0]
 
-        dvector = self.vectors[file]
-        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise, 'dvector': dvector}  
+        # dvector = self.vectors[file]
+        return {'imu': imu, 'clean': clean, 'vad': vad_annotation(clean), 'noisy': noisy, 'file': file, 'noise': noise}  
 class EMSBDataset():
     def __init__(self, emsb, noise=None, mono=False, ratio=1, snr=(-5, 15), rir=None, length=5):
         self.dataset = []
@@ -279,3 +279,39 @@ class V2SDataset():
 
         noisy *= 4; imu *= 4 # This is a magic number to move the dBFS from 38 to 26
         return {'imu': imu, 'clean': noisy, 'vad': vad_annotation(imu), 'noisy': noisy, 'file': file}
+
+if __name__ == "__main__":
+    import scipy.io.wavfile as wavfile
+    import os
+    from tqdm import tqdm
+    # directly run the script to save the dataset (noisy (2-channel: audio+imu), clean)
+    rir = 'json/rir.json'
+    dataset = 'ABCS'
+    BATCH_SIZE = 1
+    noises = [
+              'json/ASR_aishell-dev.json',
+              'json/other_DEMAND.json',
+              ]
+    noise_file = []
+    for noise in noises:
+        noise_file += json.load(open(noise, 'r'))
+
+    datasets = [ABCSDataset('json/ABCS_train.json', noise=noise_file), 
+                   ABCSDataset('json/ABCS_dev.json', noise=noise_file),
+                   ABCSDataset('json/ABCS_test.json', noise=noise_file)]
+
+    Noisy_folder = '../ABCS/Noisy/'
+    Clean_folder = '../ABCS/Clean/'
+    for dataset, set_name in zip(datasets, ['train', 'dev', 'test']):
+        loader = torch.utils.data.DataLoader(dataset=dataset, num_workers=1, batch_size=1, shuffle=False, pin_memory=True)
+        for sample in tqdm(loader):
+            acc = sample['imu'][0].numpy(); noisy = sample['noisy'][0].numpy(); clean = sample['clean'][0].numpy(); file = sample['file'][0]
+            noisy = np.concatenate([noisy, acc], axis=0)
+            base_name = os.path.basename(file)
+            noisy_file = os.path.join(Noisy_folder, set_name,  base_name)
+            clean_file = os.path.join(Clean_folder, set_name,  base_name)
+
+            #os.makedirs(os.path.dirname(noisy_file), exist_ok=True)
+            os.makedirs(os.path.dirname(clean_file), exist_ok=True)
+            #wavfile.write(noisy_file, 16000, noisy.T)
+            wavfile.write(clean_file, 16000, clean.T)
