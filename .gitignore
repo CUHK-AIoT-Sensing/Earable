@@ -1,13 +1,6 @@
-ABCS/
-EMSB/
-DEMAND/
-other/
-data_aishell/
-ASR/
-V2S/
-V2S_tmp/
+dataset/
+EarBubble/simulate/HRTF-Database
 pretrained_models/
-vibvoice+/hifi-gan/cp_hifigan/
 *.jpg
 *.bz2
 *.th
