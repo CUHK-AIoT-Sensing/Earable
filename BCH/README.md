@@ -1,2 +1,0 @@
-# BCH
-Bone Conduction Project

@@ -1,6 +1,4 @@
 dataset/
-EarBubble/simulate/HRTF-Database
-pretrained_models/
 *.jpg
 *.bz2
 *.th
