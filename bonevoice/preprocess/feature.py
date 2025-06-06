@@ -145,8 +145,8 @@ class FeatureExtractor():
     def extract_features(self, audio, feature_type):
         if feature_type == "ar":
             # Example feature extraction using AR model
-            ar_lags = 10
-            frame_full = 512
+            ar_lags = 100
+            frame_full = 577
             var1 = 2
             speechlen = 6
             stride = 3

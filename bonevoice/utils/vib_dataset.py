@@ -4,6 +4,8 @@ import torch
 import os
 import librosa
 import warnings
+import scipy.signal as signal
+import torchaudio
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 def _EMSB_dataset(directory):
@@ -24,7 +26,7 @@ def _EMSB_dataset(directory):
             }
             data['left'].append(left)
             data['right'].append(right)
-            timer += min(left_duration, right_duration)
+            timer += left_duration + right_duration
             count += 1
     print('EMSB dataset, we have recording:', count, 'whole duration (hour):', timer/3600)
     json.dump(data, open('data/EMSB.json', 'w'), indent=4)
@@ -84,29 +86,52 @@ EMSB_config = {
     'vibration_channel': 1,
     'audio_channel': 0,
     'sample_rate': 16000,
+    'highpass': 100,
 }
 V2S_config = {
     'vibration_channel': 1,
     'audio_channel': 0,
     'sample_rate': 16000,
     'gain': 4,
+    'highpass': 100,
 }
 ABCS_config = {
     'vibration_channel': 1,
     'audio_channel': 0,
-    'sample_rate': 16000
+    'sample_rate': 16000,
+    'highpass': 100,
 }
 
 class VibDataset():
-    def __init__(self, json_file, config, length=5):
+    def __init__(self, json_file, config, split='all', length=5):
         self.length = length
         self.config = config
         assert json_file.endswith('.json'), "Dataset should be a json file"
         with open(json_file, 'r') as f:
             self.json_file = json.load(f)
         # json: {split: [{'file': file_path, 'duration': duration}, ...]}
+        
+        if 'highpass' in self.config:
+            self.b, self.a = signal.butter(4, 100, 'highpass', fs=16000)
+        self.split_dataset(split)
+        
+    def split_dataset(self, split):
+        """
+        if split == None, return the whole dataset
+        if split == str of list of strings, return the dataset with the specified splits
+        """
+        if split == 'all':
+            split_selected = list(self.json_file.keys())
+        elif isinstance(split, str):
+            split_selected = [split]
+        elif isinstance(split, list):
+            split_selected = split
+        else:
+            raise ValueError("split should be None, str or list of str")
+        
         self.dataset = []
-        for split, data in self.json_file.items():
+        for split in split_selected:
+            data = self.json_file[split]
             for item in data:
                 file = item['file']; duration = item['duration']
                 num_examples = int((duration+self.length-1) // self.length)
@@ -133,28 +158,33 @@ class VibDataset():
 
         vibration = audio[self.config['vibration_channel'], :]
         audio = audio[self.config['audio_channel'], :]
+        if 'highpass' in self.config:
+            vibration = signal.filtfilt(self.b, self.a, vibration).copy().astype(np.float32)
+
         if 'gain' in self.config:
             audio *= self.config['gain']; vibration *= self.config['gain']
+            
         return {
             'audio': audio,
             'vibration': vibration,
+            'index': index,
         }
     
-def EMSB_dataset(json_file=EMSB_json, config=EMSB_config, length=5):
+def EMSB_dataset(json_file=EMSB_json, config=EMSB_config, split='all', length=5):
     """
     Load the EMSB dataset from a json file.
     """
-    return VibDataset(json_file, config, length)
-def V2S_dataset(json_file=V2S_json, config=V2S_config, length=5):
+    return VibDataset(json_file, config, split, length)
+def V2S_dataset(json_file=V2S_json, config=V2S_config, split='all', length=5):
     """
     Load the V2S dataset from a json file.
     """
-    return VibDataset(json_file, config, length)
-def ABCS_dataset(json_file=ABCS_json, config=ABCS_config, length=5):
+    return VibDataset(json_file, config, split, length)
+def ABCS_dataset(json_file=ABCS_json, config=ABCS_config, split='all', length=5):
     """
     Load the ABCS dataset from a json file.
     """
-    return VibDataset(json_file, config, length)
+    return VibDataset(json_file, config, split, length)
 
 if __name__ == "__main__":
     _EMSB_dataset('../dataset/Vibration/EMSB')

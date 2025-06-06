@@ -1,3 +1,4 @@
-from .enhancement.tfgridnet_realtime.net import Net as TFGridNetRealtime
-from .enhancement.tfgridnet_realtime.net import Multimodal_Net as Multimodal_TFGridNetRealtime
-from .enhancement.vibvoice.masker import Baseline, VibVoice, VibVoice_Early, VibVoice_Lite
+from .tfgridnet_realtime_embed.net import Net as TFGridNetRealtimeEmbed
+from .vibvoice.masker import Baseline, VibVoice, VibVoice_Early
+from .snr_estimator.lstm import Model as SNR_Estimator_LSTM
+from .snr_estimator.cnn import SpeechModel as SNR_Estimator_CNN
