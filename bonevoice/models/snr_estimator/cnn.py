@@ -74,7 +74,8 @@ class SpeechModel(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, x):
+    def forward(self, x, vibration):
+        x = torch.stack([x, vibration], dim=1)
         # x shape: (batch, channels=2, time)
         x = self.encoder(x)  # Apply convolutional layers
         x = self.stat_pooling(x)  # Apply statistics pooling

@@ -1,9 +1,13 @@
-from utils.vib_dataset import EMSB_dataset, ABCS_dataset, V2S_dataset
 from utils.bcf import Bone_Conduction_Function
 
 if __name__ == "__main__":
-    dataset = EMSB_dataset()
-    bcf = Bone_Conduction_Function(dataset)
+    dataset_name = 'EMSB'  # or 'EMSB', 'V2S'
+    bcf = Bone_Conduction_Function(dataset_name)
+
+    # dataset = ABCS_dataset()
+    # bcf = Bone_Conduction_Function(dataset, 'ABCS')
+
+    bcf.plot_bcf()
     # bcf.extraction()
-    # bcf.prediction()
-    bcf.aggregation()
+    # bcf.plot_reconstruction(10)
+

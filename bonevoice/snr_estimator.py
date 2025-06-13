@@ -25,9 +25,16 @@ class SNRESTIMATOR_LightningModule(pl.LightningModule):
         # save the config as hparams.yaml
         self.save_hyperparameters(config)
 
+    def normalize_snr(self, snr):
+        """Normalize SNR to a range of 0 to 1."""
+        min_snr = self.config['snr_range'][0]
+        max_snr = self.config['snr_range'][1]
+        return (snr - min_snr) / (max_snr - min_snr)
+
     def training_step(self, batch, batch_idx):
         input_data = [batch[key] for key in self.config['input']]
         ref_output = batch[self.config['output']]  # Assuming single output for simplicity
+        ref_output = self.normalize_snr(ref_output)  # Normalize SNR if needed
         outputs = self.model(*input_data) 
         outputs = outputs.squeeze(1)
         loss = self.loss(outputs, ref_output).mean()
@@ -37,9 +44,10 @@ class SNRESTIMATOR_LightningModule(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         input_data = [batch[key] for key in self.config['input']]
         ref_output = batch[self.config['output']]  # Assuming single output for simplicity
+        ref_output = self.normalize_snr(ref_output)  # Normalize SNR if needed
         outputs = self.model(*input_data) 
         outputs = outputs.squeeze(1)
-        loss = torch.abs(outputs - ref_output).mean()
+        loss = torch.abs(outputs - ref_output).mean() * (self.config['snr_range'][1] - self.config['snr_range'][0])  # Scale loss to original SNR range
         self.log('val/mae', loss, on_step=False, prog_bar=True, logger=True, sync_dist=True)
 
     def configure_optimizers(self):

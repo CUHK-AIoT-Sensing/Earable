@@ -6,7 +6,7 @@ import os
 import scipy.signal as signal
 
 class SNR_Controller():
-    def __init__(self, snr, dBFS):
+    def __init__(self, snr, dBFS=(-35, -15)):
         self.snr = snr
         self.dBFS = dBFS
 
@@ -24,14 +24,14 @@ class SNR_Controller():
         # dBFS = np.random.uniform(self.dBFS[0], self.dBFS[1])
         # audio = audio / (np.max(np.abs(audio)) + eps) * (10 ** (dBFS / 20))
         # audio = np.clip(audio, -1.0, 1.0)
-        return audio, snr
+        return audio, noise, snr
 
 
 def enroll_audio(folder):
     output_files = []
     for root, dirs, files in os.walk(folder):
         for file in files:
-            if file.endswith('.wav') or file.endswith('.flac'):
+            if file.endswith('.wav') or file.endswith('.flac') or file.endswith('.WAV'):
                 output_files.append(os.path.join(root, file))
     return output_files
 
@@ -75,7 +75,6 @@ class SpeechEnhancementDataset(Dataset):
             rir = None
 
         data = self.clean_dataset[index] # {'vibration': vibration, 'audio': audio}
-        
         noise_source = np.random.choice(list(self.noise_files.keys())) # Randomly select a noise source from the available noise folders
         if noise_source == 'self': 
             noise = self.clean_dataset[np.random.randint(0, len(self.clean_dataset) - 1)]['audio']  # Randomly select a noise sample from the same dataset
@@ -92,7 +91,8 @@ class SpeechEnhancementDataset(Dataset):
             if rir is not None:
                 data['audio'] = signal.fftconvolve(data['audio'], rir)[:len(data['audio'])]  # Apply RIR to the clean audio
 
-        noisy_data, snr = self.snr_controller(data['audio'], noise)
+        noisy_data, noise, snr = self.snr_controller(data['audio'], noise)
         data['noisy_audio'] = noisy_data
         data['snr'] = snr
+        data['noise'] = noise
         return data

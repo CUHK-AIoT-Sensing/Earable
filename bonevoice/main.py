@@ -5,6 +5,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer
 import json
 from utils.vib_dataset import ABCS_dataset, EMSB_dataset, V2S_dataset
+from utils.bcf_dataset import BCFDataset, aishellDataset
 import argparse
 import pandas as pd
 from tqdm import tqdm
@@ -15,6 +16,9 @@ def dataset_parser(dataset_name, split='all'):
         dataset = EMSB_dataset(split=split)
     elif dataset_name == 'V2S':
         dataset = V2S_dataset(split=split)
+    elif dataset_name == 'aishell':
+        audio_dataset = aishellDataset(folder='../dataset/Audio/aishell', split=split)
+        dataset = BCFDataset(audio_dataset, bcf_dataset='ABCS')
     else:
         raise ValueError(f"Unknown dataset name: {dataset_name}")
     return dataset
@@ -22,7 +26,7 @@ def dataset_parser(dataset_name, split='all'):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Speech Enhancement Training and Validation")
-    parser.add_argument('--config', type=str, default='tfgridnet_embed_train', help='Configuration name for the experiment')
+    parser.add_argument('--config', type=str, default='tfgridnet_embed_bcf', help='Configuration name for the experiment')
     args = parser.parse_args()
 
     config_name = args.config
@@ -39,7 +43,7 @@ if __name__ == "__main__":
 
     model = SpeechEnhancementLightningModule(config=config)
     logger = TensorBoardLogger("runs", name=config_name)
-    trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[0, 1])
+    trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[0])
     trainer.fit(model, train_loader, val_loader)
     
     # logger = TensorBoardLogger("runs", name=config_name)

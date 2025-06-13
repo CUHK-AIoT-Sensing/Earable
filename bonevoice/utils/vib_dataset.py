@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 def _EMSB_dataset(directory):
     g = os.walk(directory)
     count = 0; timer = 0
-    data = {'left': [], 'right': []}
+    data = {}
     for path, dir_list, file_list in g:
         if len(file_list) == 2: # left + right
             left_file = os.path.join(path, file_list[0]); right_file = os.path.join(path, file_list[1])
@@ -24,8 +24,9 @@ def _EMSB_dataset(directory):
                 'file': right_file,
                 'duration': right_duration
             }
-            data['left'].append(left)
-            data['right'].append(right)
+            data[path] = []
+            data[path].append(left)
+            data[path].append(right)
             timer += left_duration + right_duration
             count += 1
     print('EMSB dataset, we have recording:', count, 'whole duration (hour):', timer/3600)

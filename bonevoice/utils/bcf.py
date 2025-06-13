@@ -6,6 +6,7 @@ from tqdm import tqdm
 import multiprocessing as mp
 from functools import partial
 import os
+from .vib_dataset import EMSB_dataset, ABCS_dataset, V2S_dataset
 
 
 def estimate_frequency_response(audio, vibration, fs, nperseg=1024):
@@ -94,6 +95,8 @@ def process_data(data, fs=16000, nperseg=1024, folder='cache/bcf'):
     freqs, H = estimate_frequency_response(audio, vibration, fs=fs, nperseg=nperseg)
     pred_vibration = apply_frequency_response(audio, H, freqs, fs=fs)
     pred_error = np.mean((pred_vibration - vibration) ** 2)
+    if folder is None:
+        return H, pred_error, pred_vibration
     save_dict = {
         'H': H,
         'pred_error': pred_error,
@@ -101,15 +104,29 @@ def process_data(data, fs=16000, nperseg=1024, folder='cache/bcf'):
         'index': index
     }
     np.savez(f"{folder}/{index}.npz", **save_dict)
-    return H, pred_error
+    return H, pred_error, pred_vibration
+
+def dataset_parser(dataset_name, split='all'):
+    if dataset_name == 'ABCS':
+        dataset = ABCS_dataset(split=split)
+    elif dataset_name == 'EMSB':
+        dataset = EMSB_dataset(split=split)
+    elif dataset_name == 'V2S':
+        dataset = V2S_dataset(split=split)
+    else:
+        raise ValueError(f"Unknown dataset name: {dataset_name}")
+    return dataset
 
 class Bone_Conduction_Function():
-    def __init__(self, dataset):
-        self.dataset = dataset
-        self.folder = 'cache'
-        self.bcf_folder = f'{self.folder}/bcf'
-        self.bcf_files = [f for f in os.listdir(self.bcf_folder) if f.endswith('.npz')]
-        print(f"Found {len(self.bcf_files)} cached BCF files in {self.bcf_folder}")
+    def __init__(self, dataset_name='ABCS'):
+        self.dataset_name = dataset_name
+        self.dataset = dataset_parser(dataset_name)
+        self.folder = 'data'
+        self.bcf_folder = f'{self.folder}/{dataset_name}'
+        if not os.path.exists(self.bcf_folder):
+            os.makedirs(self.bcf_folder)
+            print(f"Created folder: {self.bcf_folder}")
+        self.load_bcf()  # Load existing BCF data if available
 
     def extraction(self, num_processes=None):
         '''
@@ -124,35 +141,104 @@ class Bone_Conduction_Function():
         '''
         if num_processes is None:
             num_processes = mp.cpu_count()  # Use all available CPU cores
-        process_func = partial(process_data, fs=16000, nperseg=1024, folder=self.bcf_folder)
-        with mp.Pool(processes=num_processes) as pool:
-            results = list(tqdm(pool.imap(process_func, self.dataset), total=len(self.dataset), desc="Processing signals"))
 
-    def aggregation(self):
-        """
-        Aggregate the frequency responses from all cached files.
-        This function assumes that the frequency responses are stored in .npz files.
-        """
-        pred_errors = []
-        for bcf_file in tqdm(self.bcf_files):
-            bcf_data = np.load(f'{self.bcf_folder}/{bcf_file}')
-            pred_error = bcf_data['pred_error']
-            pred_errors.append(pred_error)
-        plt.figure(figsize=(10, 5))
-        plt.hist(pred_errors, bins=100, color='blue', alpha=0.7)
-        plt.title('Distribution of Prediction Errors')
-        plt.xlabel('Prediction Error')
-        plt.ylabel('Frequency')
-        plt.grid()
-        plt.savefig(f'{self.folder}/prediction_error_distribution.png')
+        splits = self.dataset.json_file.keys()
+        for i, split in enumerate(splits):
+            self.dataset.split_dataset(split)
+            print(f"Processing split {i+1}/{len(splits)}: {split}, {len(self.dataset)} examples")
+            bcf_folder = f'{self.bcf_folder}/{i}'
+            if not os.path.exists(bcf_folder):
+                os.makedirs(bcf_folder)
+            # only use randomly select 100 examples for each split
+            if len(self.dataset) > 100:
+                self.dataset.dataset = np.random.choice(self.dataset.dataset, size=100, replace=False).tolist()
+            else:
+                print(f"Warning: Split {split} has less than 100 examples, using all {len(self.dataset)} examples.")
+            process_func = partial(process_data, fs=16000, nperseg=1024, folder=bcf_folder)
+            with mp.Pool(processes=num_processes) as pool:
+                results = list(tqdm(pool.imap(process_func, self.dataset), total=len(self.dataset), desc="Processing signals"))
+    
+    def load_bcf(self):
+        splits = os.listdir(self.bcf_folder)
+        self.BCF = {}
+        for i, split in enumerate(splits):
+            PSDs = []
+            split_folder = f'{self.bcf_folder}/{split}'
+            bcf_files = [f for f in os.listdir(split_folder) if f.endswith('.npz')]
+            for bcf_file in bcf_files:
+                bcf_data = np.load(f'{split_folder}/{bcf_file}')
+                PSD = bcf_data['H']
+                PSDs.append(PSD)
+            self.BCF[split] = PSDs
+        self.freqs = bcf_data['freqs']  # Assuming all splits have the same freqs
+        print(f"Loaded BCF data for {len(splits)} splits from {self.bcf_folder}")
 
-    def prediction(self, audio):
-        bcf_file = np.random.choice(self.bcf_files)
-        bcf_data = np.load(f'{self.bcf_folder}/{bcf_file}')
-        H = bcf_data['H']; freqs = bcf_data['freqs']
-        pred_vibration = apply_frequency_response(audio, H, freqs, fs=16000)
+    def predict(self, audio):
+        splits = self.BCF.keys()
+        split = np.random.choice(list(splits))  # Randomly select a split
+        bcfs = self.BCF[split]; bcfs = np.array(bcfs)
+        mean_bcf = np.mean(bcfs, axis=0)
+        # random_index = np.random.randint(0, len(bcfs))
+        # random_bcf = bcfs[random_index]
+        pred_vibration = apply_frequency_response(audio, mean_bcf, self.freqs, fs=16000)
         return pred_vibration
 
+    def plot_reconstruction_error(self):
+        splits = self.dataset.json_file.keys()
+        for i, split in enumerate(splits):
+            self.dataset.split_dataset(split)
+            bcf_folder = f'{self.bcf_folder}/{i}'
+            bcf_files = [f for f in os.listdir(bcf_folder) if f.endswith('.npz')]
+            print(f"Processing split {i+1}/{len(splits)}: {split}, {len(bcf_files)} examples")
+            pred_errors = []
+            for bcf_file in bcf_files:
+                bcf_data = np.load(f'{bcf_folder}/{bcf_file}')
+                pred_error = bcf_data['pred_error']
+                pred_errors.append(pred_error)
+            mean_pred_error = np.mean(pred_errors); std_pred_error = np.std(pred_errors)
+            plt.bar([i], [mean_pred_error], yerr=std_pred_error/(len(pred_errors)**0.5), color='blue', alpha=0.5, label='Mean Prediction Error')
+        plt.savefig(f'{self.folder}/pred_error_{self.dataset_name}.png')
 
+    def plot_reconstruction(self, index, fs=16000, nperseg=1024):
+        data = self.dataset[index]
+        vibration = data['vibration']
+        audio = data['audio']
+        H, pred_error, pred_vibration = process_data(data, fs=fs, nperseg=nperseg, folder=None)
 
-    
+        fig, axs = plt.subplots(3, 2, figsize=(10, 6))
+        axs[0, 0].plot(vibration, label='Vibration Signal', color='blue')
+        axs[0, 0].set_title('Vibration Signal')
+        axs[0, 1].specgram(vibration, Fs=fs, NFFT=nperseg, noverlap=nperseg//2, cmap='viridis')
+        axs[0, 1].set_title('Vibration Spectrogram')
+        axs[1, 0].plot(pred_vibration, label='Predicted Vibration', color='green')
+        axs[1, 0].set_title('Predicted Vibration Signal')
+        axs[1, 1].specgram(pred_vibration, Fs=fs, NFFT=nperseg, noverlap=nperseg//2, cmap='viridis')
+        axs[1, 1].set_title('Predicted Vibration Spectrogram')
+        axs[2, 0].plot(audio, label='Audio Signal', color='red')
+        axs[2, 0].set_title('Audio Signal')
+        axs[2, 1].specgram(audio, Fs=fs, NFFT=nperseg, noverlap=nperseg//2, cmap='viridis')
+        axs[2, 1].set_title('Audio Spectrogram')
+        plt.tight_layout()
+        fig.savefig(f'{self.folder}/reconstruction_{index}_{self.dataset_name}.png')
+
+    def plot_bcf(self):
+        self.load_bcf()
+        splits = os.listdir(self.bcf_folder)
+        splits = splits[:5]
+        # sample the same number of colors for each split
+        color_list = plt.cm.viridis(np.linspace(0, 1, len(splits)))
+        plt.figure(figsize=(10, 5))
+        for i, split in enumerate(splits):
+            PSDs = self.BCF[split]
+            mean_PSD = np.mean(np.abs(PSDs), axis=0); std_PSD = np.std(np.abs(PSDs), axis=0)
+            plt.plot(mean_PSD, label='Mean Frequency Response', color=color_list[i])
+            plt.fill_between(range(len(mean_PSD)), mean_PSD - std_PSD, mean_PSD + std_PSD, color=color_list[i], alpha=0.2, label='Standard Deviation')
+        freqs = self.freqs
+        plt.xticks(ticks=np.arange(0, len(freqs), step=100), labels=np.round(freqs[::100], 2), rotation=45)
+        plt.title('Mean Frequency Response with Standard Deviation')
+        plt.xlabel('Frequency')
+        plt.xscale('log')
+        plt.ylabel('Magnitude')
+        plt.tight_layout()
+        plt.savefig(f'{self.folder}/bcf_{self.dataset_name}.png')
+
