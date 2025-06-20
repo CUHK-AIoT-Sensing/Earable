@@ -17,8 +17,6 @@ from espnet2.torch_utils.get_layer_from_string import get_layer
 
 from asteroid_filterbanks import make_enc_dec
 
-from .film import FilmLayer
-from .voice_encoder import VoiceEncoder
 
 # More efficient TFGridNet:
 # 1- Causal/Streaming attention, compute attention on first chunk only by setting Q to be the last chunk
@@ -168,7 +166,6 @@ class TFGridNet(AbsSeparator):
         use_attn=True,
         chunk_causal=True,
         local_atten_len=100,
-        neural_compressor=False,
     ):
         super().__init__()
         self.n_srcs = n_srcs
@@ -229,15 +226,6 @@ class TFGridNet(AbsSeparator):
         # )
         self.embed_to_feats_proj = Embed_to_Feats(spk_emb_dim, emb_dim, n_freqs)
         
-        self.neural_compressor = neural_compressor
-        if self.neural_compressor:
-            self.mel_enc, self.mel_dec = make_enc_dec('MelGramFB',
-                                    n_filters = n_fft,
-                                    kernel_size = n_fft,
-                                    stride=stride,
-                                    window_type=window, n_mels=40)
-            self.voice_encoder = VoiceEncoder(model_embedding_size=n_fft+2, device='cuda')
-
         self.deconv = nn.ConvTranspose2d(emb_dim, n_srcs * 2, ks, padding=( self.t_ksize - 1, 1))
     
     def init_buffers(self, batch_size, device):
@@ -316,20 +304,8 @@ class TFGridNet(AbsSeparator):
         # embed = self.embed_to_feats_proj(spk_embedding) # [B, C * F]
         # embed = embed.reshape([n_batch, self.emb_dim, n_freqs]).unsqueeze(2) # [B, C, 1, F]
         if spk_embedding.shape[-1] == n_samples: # if audio, has same length -> need to do encoding, if not, it is already embedding 
-            if self.neural_compressor:
-                # option2: mel-encoder + voice_encoder
-                mels = self.mel_enc(spk_embedding)
-                mels = mels.permute(0, 2, 1) # [B, T, F]
-                spk_embedding = self.voice_encoder(mels, steps=1) # [B, T', F]
-                # downsample the spk_embedding
-                downsample_factor = 5
-                spk_embedding = spk_embedding[:, ::downsample_factor, :]
-                # upsample to the same length
-                spk_embedding = F.interpolate(spk_embedding, size=(downsample_factor,), mode='linear', align_corners=False)
-            else:   
-                # option1: use the ori-encoder
-                spk_embedding = self.enc(spk_embedding) # [B, F, T], use the same encoder
-                spk_embedding = spk_embedding.permute(0, 2, 1) # [B, T, F]
+            spk_embedding = self.enc(spk_embedding) # [B, F, T], use the same encoder
+            spk_embedding = spk_embedding.permute(0, 2, 1) # [B, T, F]
 
         embed = self.embed_to_feats_proj(spk_embedding) # [B, C, 1, F] for single embedding, [B, C, T, F] for time-embeddings
         for ii in range(self.n_layers):

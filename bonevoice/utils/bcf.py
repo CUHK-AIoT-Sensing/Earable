@@ -181,7 +181,7 @@ class Bone_Conduction_Function():
         # random_index = np.random.randint(0, len(bcfs))
         # random_bcf = bcfs[random_index]
         pred_vibration = apply_frequency_response(audio, mean_bcf, self.freqs, fs=16000)
-        return pred_vibration
+        return mean_bcf, pred_vibration
 
     def plot_reconstruction_error(self):
         splits = self.dataset.json_file.keys()
@@ -242,3 +242,13 @@ class Bone_Conduction_Function():
         plt.tight_layout()
         plt.savefig(f'{self.folder}/bcf_{self.dataset_name}.png')
 
+if __name__ == "__main__":
+    dataset_name = 'EMSB'  # or 'EMSB', 'V2S'
+    bcf = Bone_Conduction_Function(dataset_name)
+
+    # dataset = ABCS_dataset()
+    # bcf = Bone_Conduction_Function(dataset, 'ABCS')
+
+    bcf.plot_bcf()
+    # bcf.extraction()
+    # bcf.plot_reconstruction(10)

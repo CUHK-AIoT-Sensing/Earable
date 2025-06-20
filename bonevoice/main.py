@@ -5,7 +5,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer
 import json
 from utils.vib_dataset import ABCS_dataset, EMSB_dataset, V2S_dataset
-from utils.bcf_dataset import BCFDataset, aishellDataset
+from utils.bcf_dataset import BCFAugmentationDataset, aishellDataset
 import argparse
 import pandas as pd
 from tqdm import tqdm
@@ -18,7 +18,7 @@ def dataset_parser(dataset_name, split='all'):
         dataset = V2S_dataset(split=split)
     elif dataset_name == 'aishell':
         audio_dataset = aishellDataset(folder='../dataset/Audio/aishell', split=split)
-        dataset = BCFDataset(audio_dataset, bcf_dataset='ABCS')
+        dataset = BCFAugmentationDataset(audio_dataset, bcf_dataset='ABCS')
     else:
         raise ValueError(f"Unknown dataset name: {dataset_name}")
     return dataset
@@ -26,7 +26,7 @@ def dataset_parser(dataset_name, split='all'):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Speech Enhancement Training and Validation")
-    parser.add_argument('--config', type=str, default='tfgridnet_embed_bcf', help='Configuration name for the experiment')
+    parser.add_argument('--config', type=str, default='tfgridnet_embed_train', help='Configuration name for the experiment')
     args = parser.parse_args()
 
     config_name = args.config
@@ -43,8 +43,13 @@ if __name__ == "__main__":
 
     model = SpeechEnhancementLightningModule(config=config)
     logger = TensorBoardLogger("runs", name=config_name)
-    trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[0])
-    trainer.fit(model, train_loader, val_loader)
+    trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[1])
+
+    if config['checkpoint_path'] is None:
+        trainer.fit(model, train_loader, val_loader)
+    else:
+        model = SpeechEnhancementLightningModule.load_from_checkpoint(config['checkpoint_path'], config=config)
+        print(f"Loaded model from {config['checkpoint_path']}")
     
     # logger = TensorBoardLogger("runs", name=config_name)
     # trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[0])
@@ -71,20 +76,20 @@ if __name__ == "__main__":
     
 
     # # Validation for each split/ speaker
-    # splits = vib_dataset.json_file.keys()
-    # results = {}
-    # for split in tqdm(splits):
-    #     print(f"Validating split: {split}")
-    #     val_dataset = dataset_parser(config['dataset'], split=[split])
-    #     dataset = SpeechEnhancementDataset(dataset=val_dataset, noise_folders=config['noise_dataset'], rir=config['rir'],
-    #                                        length=config['length'], sample_rate=config['sample_rate'], snr_range=config['snr_range'])
-    #     val_loader = torch.utils.data.DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
-    #     result = trainer.validate(model, val_loader, verbose=False)
-    #     results[split] = result[0]
-    # # save results to a CSV file
-    # results_df = pd.DataFrame(results).T
-    # results_df.to_csv(f"{config_name}_results.csv", index_label='split')
-    # print("Validation results saved to CSV file.")
+    splits = vib_dataset.json_file.keys()
+    results = {}
+    for split in tqdm(splits):
+        print(f"Validating split: {split}")
+        val_dataset = dataset_parser(config['dataset'], split=[split])
+        dataset = SpeechEnhancementDataset(dataset=val_dataset, noise_folders=config['noise_dataset'], rir=config['rir'],
+                                           length=config['length'], sample_rate=config['sample_rate'], snr_range=config['snr_range'])
+        val_loader = torch.utils.data.DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
+        result = trainer.validate(model, val_loader, verbose=False)
+        results[split] = result[0]
+    # save results to a CSV file
+    results_df = pd.DataFrame(results).T
+    results_df.to_csv(f"{config_name}_results.csv", index_label='split')
+    print("Validation results saved to CSV file.")
     
 
   

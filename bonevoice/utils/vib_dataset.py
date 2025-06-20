@@ -88,6 +88,7 @@ EMSB_config = {
     'audio_channel': 0,
     'sample_rate': 16000,
     'highpass': 100,
+    'norm_vibration': 2000,
 }
 V2S_config = {
     'vibration_channel': 1,
@@ -95,12 +96,15 @@ V2S_config = {
     'sample_rate': 16000,
     'gain': 4,
     'highpass': 100,
+    'norm_vibration': 2000,
+
 }
 ABCS_config = {
     'vibration_channel': 1,
     'audio_channel': 0,
     'sample_rate': 16000,
     'highpass': 100,
+    'norm_vibration': 2000,
 }
 
 class VibDataset():
@@ -113,7 +117,9 @@ class VibDataset():
         # json: {split: [{'file': file_path, 'duration': duration}, ...]}
         
         if 'highpass' in self.config:
-            self.b, self.a = signal.butter(4, 100, 'highpass', fs=16000)
+            self.b, self.a = signal.butter(4, self.config['highpass'], 'highpass', fs=16000)
+        if 'norm_vibration' in self.config:
+            self.b, self.a = signal.butter(4, self.config['norm_vibration'], 'lowpass', fs=16000)
         self.split_dataset(split)
         
     def split_dataset(self, split):
@@ -162,12 +168,16 @@ class VibDataset():
         if 'highpass' in self.config:
             vibration = signal.filtfilt(self.b, self.a, vibration).copy().astype(np.float32)
 
+        if 'norm_vibration' in self.config:
+            norm_vibration = signal.filtfilt(self.b, self.a, audio).copy().astype(np.float32)
+
         if 'gain' in self.config:
             audio *= self.config['gain']; vibration *= self.config['gain']
             
         return {
             'audio': audio,
             'vibration': vibration,
+            'norm_vibration': norm_vibration,
             'index': index,
         }
     
