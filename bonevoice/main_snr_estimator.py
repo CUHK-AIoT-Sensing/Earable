@@ -79,7 +79,12 @@ if __name__ == "__main__":
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 
-    model = SNRESTIMATOR_LightningModule(config)
     logger = TensorBoardLogger("runs", name=config_name)
     trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[0])
-    trainer.fit(model, train_loader, val_loader)
+    if config['checkpoint']:
+        print(f"Loading checkpoint from {config['checkpoint']}")
+        model = SNRESTIMATOR_LightningModule.load_from_checkpoint(config['checkpoint'], config=config)
+        trainer.validate(model, val_loader)
+    else:
+        model = SNRESTIMATOR_LightningModule(config)
+        trainer.fit(model, train_loader, val_loader)

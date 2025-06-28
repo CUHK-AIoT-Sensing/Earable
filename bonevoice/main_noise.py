@@ -64,7 +64,6 @@ if __name__ == "__main__":
     # val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
     # result = trainer.fit(model, train_loader, val_loader)
 
-
     # remix self-supervision
     model = SelfSupervisionLightningModule.load_from_checkpoint(pretrained_checkpoint, config=config, strict=False)
     dataset = SpeechEnhancementDataset(dataset=vib_dataset, noise_folders=config['noise_dataset'], rir=config['rir'],

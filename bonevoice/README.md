@@ -1,0 +1,1 @@
+pip install -e 'git+https://github.com/fschmid56/EfficientAT_HEAR@0.0.2#egg=hear_mn' 

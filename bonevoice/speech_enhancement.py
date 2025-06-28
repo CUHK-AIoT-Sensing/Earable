@@ -48,7 +48,7 @@ class SpeechEnhancementLightningModule(pl.LightningModule):
         outputs = self.model(*input_data) 
         outputs = outputs.squeeze(1)
         loss = self.loss(outputs, ref_output).mean()
-        mixture_loss = self.loss(input_data[0], ref_output).mean()
+        mixture_loss = self.loss(batch['audio'], ref_output).mean()
         self.log('val/mixture', mixture_loss, on_step=False, prog_bar=True, logger=True, sync_dist=True)
         self.log('val/sisnr', loss, on_step=False, prog_bar=True, logger=True, sync_dist=True)
         self.log('val/sisnr_i', loss - mixture_loss, on_step=False, prog_bar=True, logger=True, sync_dist=True)

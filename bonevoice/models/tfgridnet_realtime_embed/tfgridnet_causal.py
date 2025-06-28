@@ -227,7 +227,6 @@ class TFGridNet(AbsSeparator):
         self.embed_to_feats_proj = Embed_to_Feats(spk_emb_dim, emb_dim, n_freqs)
         
         self.deconv = nn.ConvTranspose2d(emb_dim, n_srcs * 2, ks, padding=( self.t_ksize - 1, 1))
-    
     def init_buffers(self, batch_size, device):
         conv_buf = torch.zeros(batch_size, self.n_imics*2, self.t_ksize - 1, self.n_freqs,
                               device=device)
@@ -303,7 +302,7 @@ class TFGridNet(AbsSeparator):
         # ts = [0, 0, 0, 0, 0, 0 ]
         # embed = self.embed_to_feats_proj(spk_embedding) # [B, C * F]
         # embed = embed.reshape([n_batch, self.emb_dim, n_freqs]).unsqueeze(2) # [B, C, 1, F]
-        if spk_embedding.shape[-1] == n_samples: # if audio, has same length -> need to do encoding, if not, it is already embedding 
+        if spk_embedding.shape[-1] == n_samples:
             spk_embedding = self.enc(spk_embedding) # [B, F, T], use the same encoder
             spk_embedding = spk_embedding.permute(0, 2, 1) # [B, T, F]
 
@@ -354,7 +353,6 @@ class TFGridNet(AbsSeparator):
             input_tensor, (0, target_len - input_tensor.shape[-1])
         )
         return input_tensor
-
 
 class GridNetBlock(nn.Module):
     def __getitem__(self, key):
@@ -650,7 +648,6 @@ class GridNetBlock(nn.Module):
                 out = out.permute(0, 3, 1, 2)
 
         return out, init_state#, [t0 - t0_0, t1 - t0, t2 - t2_0, t3 - t2, t5 - t4, t7 - t6]
-
 
 # Use native layernorm implementation
 class LayerNormalization4D(nn.Module):

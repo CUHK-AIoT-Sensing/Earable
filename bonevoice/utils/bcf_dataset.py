@@ -1,4 +1,5 @@
 from .bcf import Bone_Conduction_Function, estimate_frequency_response
+from .aishell_dataset import aishellDataset
 from torch.utils.data import Dataset
 import os
 import librosa
@@ -12,32 +13,6 @@ def enroll_audio(folder):
             if file.endswith('.wav') or file.endswith('.flac') or file.endswith('.WAV'):
                 output_files.append(os.path.join(root, file))
     return output_files
-
-class aishellDataset():
-    def __init__(self, folder, split='all', length=5, sample_rate=16000):
-        self.folder = folder
-        self.split = f'aishell-{split}'
-        self.length = length
-        self.sample_rate = sample_rate
-        self.dataset = []
-        self.split_folder = os.path.join(folder, self.split)
-        self.audio_files = enroll_audio(self.split_folder)
-    def __len__(self):
-        return len(self.audio_files)
-    def __getitem__(self, index):
-        file = self.audio_files[index]
-        audio = librosa.load(file, sr=self.sample_rate, mono=True)[0]  # Load audio file
-        if len(audio) <= self.length * self.sample_rate:
-            pad = (self.length * self.sample_rate) - len(audio)
-            audio = np.pad(audio, (0, pad), mode='constant')
-        else:
-            offset = np.random.randint(0, len(audio) - self.length * self.sample_rate)
-            audio = audio[offset:offset + self.length * self.sample_rate]
-        data = {
-            'index': index,
-            'audio': audio,
-        }
-        return data
 
 class BCFAugmentationDataset():
     '''
