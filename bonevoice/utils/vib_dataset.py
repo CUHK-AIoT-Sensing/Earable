@@ -5,7 +5,7 @@ import os
 import librosa
 import warnings
 import scipy.signal as signal
-import torchaudio
+import pandas as pd
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 def _EMSB_dataset(directory):
@@ -97,6 +97,7 @@ V2S_config = {
     'gain': 4,
     'highpass': 100,
     'norm_vibration': 2000,
+    'text': True,  # whether to load the text labels
 
 }
 ABCS_config = {
@@ -173,12 +174,24 @@ class VibDataset():
 
         if 'gain' in self.config:
             audio *= self.config['gain']; vibration *= self.config['gain']
+
+        if 'text' in self.config:
+            file_dir_name, file_name = os.path.dirname(file), os.path.basename(file)
+            text_file = os.path.join(file_dir_name, 'labels.txt')
+            labels = open(text_file, 'r').readlines()
+            text = ''
+            for label in labels:
+                filename = label.split()[0]
+                if filename == file_name[:-4]:
+                    text = ' '.join(label.split()[1:])
+                    break
             
         return {
             'audio': audio,
             'vibration': vibration,
             'norm_vibration': norm_vibration,
             'index': index,
+            'text': text if 'text' in self.config else '',
         }
     
 def EMSB_dataset(json_file=EMSB_json, config=EMSB_config, split='all', length=5):

@@ -2,6 +2,10 @@ import numpy as np
 from scipy import signal
 from scipy.fft import fft, ifft
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib import rc
+rc('text', usetex=False)
+plt.rcParams.update({'font.size': 20})
 from tqdm import tqdm
 import multiprocessing as mp
 from functools import partial
@@ -118,10 +122,10 @@ def dataset_parser(dataset_name, split='all'):
     return dataset
 
 class Bone_Conduction_Function():
-    def __init__(self, dataset_name='ABCS'):
+    def __init__(self, dataset_name='ABCS', folder = 'data'):
         self.dataset_name = dataset_name
         self.dataset = dataset_parser(dataset_name)
-        self.folder = 'data'
+        self.folder = folder
         self.bcf_folder = f'{self.folder}/{dataset_name}'
         if not os.path.exists(self.bcf_folder):
             os.makedirs(self.bcf_folder)
@@ -222,7 +226,6 @@ class Bone_Conduction_Function():
         fig.savefig(f'{self.folder}/reconstruction_{index}_{self.dataset_name}.png')
 
     def plot_bcf(self):
-        self.load_bcf()
         splits = os.listdir(self.bcf_folder)
         splits = splits[:5]
         # sample the same number of colors for each split
@@ -235,20 +238,10 @@ class Bone_Conduction_Function():
             plt.fill_between(range(len(mean_PSD)), mean_PSD - std_PSD, mean_PSD + std_PSD, color=color_list[i], alpha=0.2, label='Standard Deviation')
         freqs = self.freqs
         plt.xticks(ticks=np.arange(0, len(freqs), step=100), labels=np.round(freqs[::100], 2), rotation=45)
-        plt.title('Mean Frequency Response with Standard Deviation')
+        plt.title('Bone Conduction Function')
         plt.xlabel('Frequency')
         plt.xscale('log')
         plt.ylabel('Magnitude')
         plt.tight_layout()
-        plt.savefig(f'{self.folder}/bcf_{self.dataset_name}.png')
+        plt.savefig(f'resources/bcf_{self.dataset_name}.pdf')
 
-if __name__ == "__main__":
-    dataset_name = 'EMSB'  # or 'EMSB', 'V2S'
-    bcf = Bone_Conduction_Function(dataset_name)
-
-    # dataset = ABCS_dataset()
-    # bcf = Bone_Conduction_Function(dataset, 'ABCS')
-
-    bcf.plot_bcf()
-    # bcf.extraction()
-    # bcf.plot_reconstruction(10)

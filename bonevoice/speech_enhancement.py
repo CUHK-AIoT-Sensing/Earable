@@ -1,3 +1,4 @@
+import torch
 from torch import optim
 # We train the same model architecture that we used for inference above.
 from asteroid.models import SuDORMRFNet, DPRNNTasNet
@@ -8,6 +9,18 @@ from asteroid.losses import singlesrc_neg_sisdr
 import pytorch_lightning as pl
 import soundfile as sf
 import os
+from torchmetrics.audio import pesq
+
+def Log_Spectral_Distance(y_true, y_pred):
+    """
+    Log-Spectral Distance: $LSD(x, y)= \frac{1}{L} \sum_{l=1}^{L} \sqrt{\frac{1}{K}\sum_{k=1}^{K}(X(l,k) - \hat{X}(l,k))^2}$,
+    """
+    spec_true = torch.stft(y_true, n_fft=512, hop_length=128, win_length=512, window=torch.hann_window(512), return_complex=True)
+    spec_pred = torch.stft(y_pred, n_fft=512, hop_length=128, win_length=512, window=torch.hann_window(512), return_complex=True)
+    log_spec_true = torch.log(spec_true ** 2); log_spec_pred = torch.log(spec_pred ** 2)
+    LSD = torch.sqrt(torch.mean((log_spec_true - log_spec_pred) ** 2, dim=-1)).mean()
+    return LSD
+
 
 def model_parser(model_config):
     if model_config['name'] == 'SuDORMRFNet':
@@ -32,6 +45,7 @@ class SpeechEnhancementLightningModule(pl.LightningModule):
         self.loss = singlesrc_neg_sisdr
         # save the config as hparams.yaml
         self.save_hyperparameters(config)
+        # self.pesq = pesq.PerceptualEvaluationSpeechQuality(16000, 'wb')
 
     def training_step(self, batch, batch_idx):
         input_data = [batch[key] for key in self.config['input']]
@@ -48,10 +62,14 @@ class SpeechEnhancementLightningModule(pl.LightningModule):
         outputs = self.model(*input_data) 
         outputs = outputs.squeeze(1)
         loss = self.loss(outputs, ref_output).mean()
-        mixture_loss = self.loss(batch['audio'], ref_output).mean()
-        self.log('val/mixture', mixture_loss, on_step=False, prog_bar=True, logger=True, sync_dist=True)
+        mixture_loss = self.loss(batch['noisy_audio'], ref_output).mean()
+        # self.log('val/mixture', mixture_loss, on_step=False, prog_bar=True, logger=True, sync_dist=True)
+        # pesq_score = self.pesq(outputs, ref_output)
+
         self.log('val/sisnr', loss, on_step=False, prog_bar=True, logger=True, sync_dist=True)
         self.log('val/sisnr_i', loss - mixture_loss, on_step=False, prog_bar=True, logger=True, sync_dist=True)
+        # self.log('val/pesq', pesq_score, on_step=False, prog_bar=True, logger=True, sync_dist=True)
+        
 
     def test_step(self, batch, batch_idx):
         input_data = [batch[key] for key in self.config['input']]

@@ -95,7 +95,7 @@ if __name__ == '__main__':
     # extract_features(split='eval')
     dataset = FSD50KDataset(folder='../dataset/Audio/FSD50K', split='eval', length=2, sample_rate=16000, feature=True)
     features = []
-    for i in range(20):
+    for i in range(100):
         dataset_i = FSD50KDataset_class(folder='../dataset/Audio/FSD50K', split='eval', length=2, sample_rate=16000, class_id=[i], feature=True)
         print(f'Class {i} has {len(dataset_i)} samples')
         features_i = []
@@ -106,30 +106,46 @@ if __name__ == '__main__':
         features.append(np.stack(features_i, axis=0))
     features = np.stack(features, axis=0).squeeze() # shape (4, 20, C)
     print(f'Features shape: {features.shape}')  # shape (4, 20, C)
-    # cosine_similarity
-    # intra_class_similarity = []
-    # for i in range(features.shape[0]):
-    #     feature_i = features[i]  # shape (20, C)
-    #     cosine_similarity = feature_i @ feature_i.T/ (np.linalg.norm(feature_i, axis=1, keepdims=True) * np.linalg.norm(feature_i, axis=1, keepdims=True).T)
-    #     intra_class_similarity.append(cosine_similarity.mean())
-    # print(intra_class_similarity)
 
-    # features = features.reshape(-1, features.shape[-1])  # shape (80, C)
-    # cosine_similarity = features @ features.T / (np.linalg.norm(features, axis=1, keepdims=True) * np.linalg.norm(features, axis=1, keepdims=True).T)
-    # cosine_similarity = cosine_similarity.mean()
-    # print(f'Inter-class cosine similarity: {cosine_similarity}')
+    inter_class_similarity = []; intra_class_similarity = []
+    for i in range(features.shape[0]):
+        feature_i = features[i]  # shape (20, C)
 
+        feature_other = np.delete(features, i, axis=0)  # shape (3, 20, C)
+        feature_other = feature_other.reshape(-1, feature_other.shape[-1])  # shape
+
+        cosine_similarity = feature_i @ feature_other.T / (np.linalg.norm(feature_i, axis=1, keepdims=True) * np.linalg.norm(feature_other, axis=1, keepdims=True).T)
+        cosine_similarity = cosine_similarity.mean()
+        inter_class_similarity.append(cosine_similarity)
+
+        cosine_similarity = feature_i @ feature_i.T / (np.linalg.norm(feature_i, axis=1, keepdims=True) * np.linalg.norm(feature_i, axis=1, keepdims=True).T)
+        cosine_similarity = cosine_similarity.mean()
+        intra_class_similarity.append(cosine_similarity)
+    print(inter_class_similarity)
+    print(intra_class_similarity)
+
+    # plot the similarities in histogram
     import matplotlib.pyplot as plt
-    import sklearn.manifold
-    TSNE = sklearn.manifold.TSNE(n_components=2, random_state=42)
-    features_2d = TSNE.fit_transform(features.reshape(-1, features.shape[-1]))
-    features_2d = features_2d.reshape(features.shape[0], -1, 2)  # shape (4, 20, 2)
-
-    plt.figure(figsize=(10, 10))
-    for i in range(features_2d.shape[0]):
-        plt.scatter(features_2d[i, :, 0], features_2d[i, :, 1], label=f'Class {i}')
+    plt.hist(inter_class_similarity, bins=20, alpha=0.5, label='Same class', color='blue')
+    plt.hist(intra_class_similarity, bins=20, alpha=0.5, label='Different class', color='orange')
     plt.legend()
-    plt.title('t-SNE of FSD50K Features')
-    plt.xlabel('t-SNE Component 1')
-    plt.ylabel('t-SNE Component 2')
-    plt.savefig('fsd50k_features_tsne.png')
+    plt.xlabel('Cosine Similarity')
+    plt.ylabel('Frequency')
+    plt.title('Inter vs Intra Class Similarity')
+    plt.savefig('resources/sound_similarity_histogram.pdf')
+
+
+    # import matplotlib.pyplot as plt
+    # import sklearn.manifold
+    # TSNE = sklearn.manifold.TSNE(n_components=2, random_state=42)
+    # features_2d = TSNE.fit_transform(features.reshape(-1, features.shape[-1]))
+    # features_2d = features_2d.reshape(features.shape[0], -1, 2)  # shape (4, 20, 2)
+
+    # plt.figure(figsize=(10, 10))
+    # for i in range(features_2d.shape[0]):
+    #     plt.scatter(features_2d[i, :, 0], features_2d[i, :, 1], label=f'Class {i}')
+    # plt.legend()
+    # plt.title('t-SNE of FSD50K Features')
+    # plt.xlabel('t-SNE Component 1')
+    # plt.ylabel('t-SNE Component 2')
+    # plt.savefig('fsd50k_features_tsne.png')

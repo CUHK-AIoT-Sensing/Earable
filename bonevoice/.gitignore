@@ -1,3 +1,4 @@
 runs
 *.pdf
 *.csv
+*.log

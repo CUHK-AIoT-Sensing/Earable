@@ -80,11 +80,23 @@ if __name__ == "__main__":
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 
     logger = TensorBoardLogger("runs", name=config_name)
-    trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[0])
+    trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[1])
     if config['checkpoint']:
         print(f"Loading checkpoint from {config['checkpoint']}")
         model = SNRESTIMATOR_LightningModule.load_from_checkpoint(config['checkpoint'], config=config)
-        trainer.validate(model, val_loader)
+        import pandas as pd
+        snr_estimations = []
+        for snr in range(config['snr_range'][0], config['snr_range'][1] + 1, 2):
+            snr = [snr, snr]
+            dataset = SpeechEnhancementDataset(dataset=vib_dataset, noise_folders=config['noise_dataset'], rir=config['rir'],
+                                               length=config['length'], sample_rate=config['sample_rate'], snr_range=snr, )
+            val_dataset = torch.utils.data.Subset(dataset, range(int(len(dataset) * 0.8), len(dataset)))
+            val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
+            results = trainer.validate(model, val_loader)
+            snr_estimations.append([snr[0], results[0]['val/mae']])
+        snr_estimations = pd.DataFrame(snr_estimations, columns=['SNR', 'MAE'])
+        snr_estimations.to_csv(f"snr_estimations.csv", index=False)
+        print(snr_estimations)
     else:
         model = SNRESTIMATOR_LightningModule(config)
         trainer.fit(model, train_loader, val_loader)

@@ -43,22 +43,15 @@ if __name__ == "__main__":
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 
     logger = TensorBoardLogger("runs", name=config_name)
-    trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[1])
+    trainer = Trainer(max_epochs=config['epochs'], logger=logger, accelerator='gpu', devices=[0])
 
-    # if config['checkpoint_path'] is None:
-    #     model = SpeechEnhancementLightningModule(config=config)
-    #     trainer.fit(model, train_loader, val_loader)
-    # else:
-    #     model = SpeechEnhancementLightningModule.load_from_checkpoint(config['checkpoint_path'], config=config)
-    #     print(f"Loaded model from {config['checkpoint_path']}")
-    
-    # split the snr_range into multiple levels
-    snr_range = config['snr_range']; num_levels = 5
-    snr_levels = np.linspace(snr_range[0], snr_range[1], num_levels + 1)
-    snr_bins = [(snr_levels[i], snr_levels[i + 1])
-                for i in range(len(snr_levels) - 1)]
-    for i, snr_bin in enumerate(snr_bins):
-        config['snr_range'] = snr_bin
-        config['model']['params']['B'] = (i+1)
+    from main_e2e import snr_wise_validation
+    config['model']['params']['B'] = 4
+    if not config['checkpoint_path']:
         model = SpeechEnhancementLightningModule(config=config)
-        trainer.fit(model, train_loader, val_loader)
+    else:
+        model = SpeechEnhancementLightningModule.load_from_checkpoint(config['checkpoint_path'], config=config)
+        print(f"Loaded model from {config['checkpoint_path']}")
+    
+    trainer.fit(model, train_loader, val_loader)
+    snr_wise_validation(config, config_name + '_4', vib_dataset, trainer, model)

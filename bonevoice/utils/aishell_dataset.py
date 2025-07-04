@@ -56,6 +56,7 @@ if __name__ == '__main__':
             embeddings[SID] = []
         embeddings[SID].append(embed)
     print(len(embeddings), 'speakers found')
+    similarities = []
     for SID, embeds in embeddings.items():
         if len(embeds) < 2:
             continue
@@ -72,4 +73,18 @@ if __name__ == '__main__':
         other_embeds = np.stack(other_embeds, axis=0)
         inter_similarity = embeds @ other_embeds.T / (np.linalg.norm(embeds, axis=1, keepdims=True) * np.linalg.norm(other_embeds, axis=1, keepdims=True).T) 
         inter_similarity = inter_similarity.mean()
+
+        similarities.append((intra_similarity, inter_similarity))
         print(f'Speaker {SID}: Intra-similarity: {intra_similarity:.4f}, Inter-similarity: {inter_similarity:.4f}')
+
+    # plot the similarities in histogram
+    import matplotlib.pyplot as plt
+    intra_similarities = [s[0] for s in similarities]
+    inter_similarities = [s[1] for s in similarities]
+    plt.hist(intra_similarities, bins=50, alpha=0.5, label='Same speaker', color='blue')
+    plt.hist(inter_similarities, bins=50, alpha=0.5, label='Different speaker', color='orange')
+    plt.xlabel('Cosine Similarity')
+    plt.ylabel('Frequency')
+    plt.title('Intra vs Inter Speaker Similarity')
+    plt.legend()
+    plt.savefig('resources/speech_similarity_histogram.pdf')
